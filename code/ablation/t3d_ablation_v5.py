@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""T3d = T3c 消融协议在建模表 v5 上的复跑（数据版本对照之一）。
+"""T3d = the T3c ablation protocol rerun on modeling table v5 (data-version control, part one).
 
-与 t3c_ablation_local.py 唯一的区别：DATA 指向建模表_v5.csv，输出前缀 t3d_。
-存在意义：论文表 6 注明消融对照是在含曲线特征列的同一数据版本上重跑。
-v3/v5/v3c 三个数据版本各跑一遍，排除"结论是数据版本的巧合"的质疑。
-日常阅读请看 t3c_ablation_local.py，协议细节不在本文件重复。"""
+The only difference from t3c_ablation_local.py: DATA points to modeling_table_v5.csv and outputs use the t3d_ prefix.
+Rationale: Table 6 notes the ablation control was rerun on the same data version that carries the curve columns.
+Running all three data versions (v3/v5/v3c) rules out the objection that the conclusion is a data-version fluke.
+For protocol details read t3c_ablation_local.py; they are not repeated here."""
 import argparse, json, os, random, time
 import numpy as np
 import pandas as pd
@@ -12,23 +12,23 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-# base7（历史名，现为 6 维）= 剔除 charge_dur_s（MIT 缺失）和 soh。
-# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
-# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+# base7 (historical name, now 6 features) = drop charge_dur_s (missing for MIT) and soh.
+# soh must be dropped: it is the label of the SOH task, and a label in the inputs hands the answer to the model
+# (before the 2026-10-03 fix an identity-copy baseline scored RMSE=0, the leak in plain sight).
 FEATS_BASE7 = ["capacity_Ah", "discharge_dur_s", "v_mean_V", "v_min_V",
               "ica_peak", "ica_peak_V"]
-# 超前步长：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前 SOH 预测）。
+# horizon: label = soh at H cycles after the last row of the window (H-step-ahead SOH prediction).
 H = 10
-# 曲线增强: +定分数容量电压点(v_q10..v_q90) +ICA次峰 +半高宽
+# curve features: + fixed-quantile capacity-voltage points (v_q10..v_q90) + ICA secondary peak + FWHM
 FEATS_CURVE14 = FEATS_BASE7 + ["v_q10", "v_q30", "v_q50", "v_q70", "v_q90",
                                "ica2_peak", "ica_fwhm"]
-FEATS = FEATS_BASE7  # 运行时由 --feats 覆盖
+FEATS = FEATS_BASE7  # overridden at runtime by --feats
 WINDOW = 20
-# 建模表路径（数据放 data/ 下即可，合并方法见 code/README.md）
-DATA = "data/建模表_v5.csv"
+# modeling-table path (data goes under data/; merge procedure in code/README.md)
+DATA = "data/modeling_table_v5.csv"
 
 def set_seed(seed):
-    """固定随机源（GPU 卷积仍非确定性，重跑有小幅浮动，见 t2_train_local 同名函数）。"""
+    """Fix the random sources (GPU convolution stays nondeterministic, so reruns move a little; see the same-named function in t2_train_local)."""
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -143,17 +143,17 @@ def main():
     ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--ft-epochs", type=int, default=60)
     ap.add_argument("--horizon", type=int, default=H,
-                    help="超前步长：标签 = 窗口末行后第 H 个循环的 soh")
+                    help="horizon: label = soh at H cycles after the last window row")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--feats", default="base7", choices=["base7", "curve14"])
-    ap.add_argument("--data", default="data/建模表_v5.csv", help="建模表 csv 路径")
+    ap.add_argument("--data", default="data/modeling_table_v5.csv", help="modeling-table csv path")
     ap.add_argument("--out", default="results/ablation")
     args = ap.parse_args()
-    # 特征集在运行时切换：base7（历史名）= 论文的"基础 6 维"，curve14（历史名）= "曲线增强 13 维"
+    # the feature set is switched at runtime: base7 (historical name) = the paper's base-6, curve14 = curve-13
     global FEATS
     FEATS = FEATS_BASE7 if args.feats == "base7" else FEATS_CURVE14
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"T3b(逐数据集标准化) device={device} model={args.model}", flush=True)
+    print(f"T3b (per-dataset standardization) device={device} model={args.model}", flush=True)
     df = pd.read_csv(args.data)
     src = build_windows_ds(df, "MIT", horizon=args.horizon)
     src_bids = sorted(src)
@@ -163,12 +163,12 @@ def main():
     Xva, yva, _ = concat_cells(src, src_bids[-n_va:])
     sc_src = StandardScaler().fit(Xtr.reshape(-1, Xtr.shape[2]))
     Xtr, Xva = std_with(sc_src, Xtr), std_with(sc_src, Xva)
-    print(f"源域 MIT: 训练电芯 {len(src_bids)-n_va}, 窗口 {len(Xtr)}", flush=True)
-    set_seed(args.seed)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    print(f"source MIT: train cells {len(src_bids)-n_va}, windows {len(Xtr)}", flush=True)
+    set_seed(args.seed)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model = new_model(args.model, Xtr.shape[2]).to(device)
     t0 = time.time()
     model = fit_model(model, Xtr, ytr, args.epochs, args.seed, device, Xva, yva)
-    print(f"源域训练完成 {time.time()-t0:.0f}s", flush=True)
+    print(f"source-domain training done in {time.time()-t0:.0f}s", flush=True)
     results = {"model": args.model, "task": "soh", "protocol": "per-dataset-std", "feats": args.feats,
                "seed": args.seed, "horizon": args.horizon, "targets": {}}
     for tgt_name in ["CALCE", "NASA"]:
@@ -177,7 +177,7 @@ def main():
         n_ft = max(1, len(tb) // 2)
         random.Random(args.seed).shuffle(tb)
         ft_bids, te_bids = tb[:n_ft], tb[n_ft:]
-        # 目标域 scaler: 全部目标窗口的无标签统计量(标准无监督DA口径)
+        # target-domain scaler: unlabeled statistics of all target windows (standard unsupervised DA scope)
         Xall_t, yall_t, _ = concat_cells(tgt, tb)
         sc_tgt = StandardScaler().fit(Xall_t.reshape(-1, Xall_t.shape[2]))
         Xte, yte, _ = concat_cells(tgt, te_bids)
@@ -185,12 +185,12 @@ def main():
         Xft, yft, _ = concat_cells(tgt, ft_bids)
         ft_model = new_model(args.model, Xtr.shape[2]).to(device)
         ft_model.load_state_dict(model.state_dict())
-        # 微调 lr=3e-4（比源域小一个量级），与 t3b 主实验一致。
-        # 消融只动特征集，其他变量全部锁死，差异才能归因到特征上
+        # fine-tuning lr=3e-4 (an order below the source), as in the t3b main experiment.
+        # the ablation changes the feature set only and locks every other variable, so differences are attributable to features
         ft_model = fit_model(ft_model, std_with(sc_tgt, Xft), yft,
                              args.ft_epochs, args.seed, device, lr=3e-4)
         r_ft = eval_model(ft_model, std_with(sc_tgt, Xte), yte, device)
-        set_seed(args.seed)  # target-only 从随机初始化训起，同样先定随机源
+        set_seed(args.seed)  # target-only starts from random init; fix the seed first as well
         to_model = new_model(args.model, Xtr.shape[2]).to(device)
         to_model = fit_model(to_model, std_with(sc_tgt, Xft), yft,
                              args.ft_epochs, args.seed, device, lr=1e-3)

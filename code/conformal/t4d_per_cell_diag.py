@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
-"""T4d 保形覆盖的两项补充诊断（论文 4.6 节的数据出处）。
+"""T4d two supplementary diagnostics of conformal coverage (data behind Section 4.6).
 
-表 5 报的是"汇集所有测试窗口"的边际覆盖率。该口径下有两个问题，本脚本依次诊断：
+Table 5 reports marginal coverage over all pooled test windows. Two issues arise under that scope; this script diagnoses them in turn.
 
-第一，边际覆盖不等于条件覆盖。把覆盖率拆到每颗测试电芯（cov_tgt / cov_src），
-   检查是否存在个别电芯被平均所掩盖。
+First, marginal coverage is not conditional coverage. Breaking coverage down per test cell (cov_tgt / cov_src)
+   checks whether individual cells are hidden by the average.
 
-第二，循环级残差自相关，可交换性不成立。把校准得分聚合到电芯级（中位数/p90/
-   均值三种口径）后再走保形：1~2 颗校准电芯只给出 1~2 个电芯级得分，分位数
-   退化为最大值，有限样本保证不再成立，结果仅有经验意义。
+Second, cycle-level residuals are autocorrelated, so exchangeability fails. Aggregating calibration scores to the
+   cell level (median / p90 / mean) and running conformal on that gives only 1-2 cell-level scores from 1-2
+   calibration cells; the quantile degenerates to the maximum, the finite-sample guarantee is void and results are empirical only.
 
-口径（与 t4 一致）：校准残差由微调后的部署模型在校准电芯上计算，保证校准与
-评估同源。本脚本输出逐电芯残差向量（t4 亦输出），给出按电芯聚合的保形变体，
-并与 t4_*.json 做逐组划分 assert 校验。
+Convention (same as t4): calibration residuals come from the fine-tuned deployed model on the calibration
+cells, keeping calibration and evaluation on the same model. The script emits per-cell residual vectors (t4 does
+too), provides the per-cell aggregated conformal variants, and asserts the splits against t4_*.json group by group.
 
-复用 t4_conformal_local 的协议与随机次序：电芯划分由种子唯一决定。
-源模型按 (model, seed) 缓存到 src_cache/，重跑免预训练。
+Reuses the t4_conformal_local protocol and random order: the cell split is determined by the seed alone.
+Source models are cached per (model, seed) under src_cache/, so reruns skip pre-training.
 
-用法：python t4d_per_cell_diag.py --model tcn --seed 42
-输出：results/conformal/t4d_per_cell_{model}_s{seed}.json"""
+Usage: python t4d_per_cell_diag.py --model tcn --seed 42
+Output: results/conformal/t4d_per_cell_{model}_s{seed}.json"""
 import argparse, json, os, random, time
 import numpy as np
 import pandas as pd
@@ -26,14 +26,14 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
-# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+# soh must be dropped: it is the label of the SOH task, and a label in the inputs hands the answer to the model
+# (before the 2026-10-03 fix an identity-copy baseline scored RMSE=0, the leak in plain sight).
 FEATS = ["capacity_Ah", "discharge_dur_s", "v_mean_V", "v_min_V",
          "ica_peak", "ica_peak_V"]
 WINDOW = 20
-# 超前步长：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前 SOH 预测）。
+# horizon: label = soh at H cycles after the last row of the window (H-step-ahead prediction).
 H = 10
-DATA = "data/建模表_v3.csv"
+DATA = "data/modeling_table_v3.csv"
 ALPHA = 0.10
 OUT = "results/conformal"
 CACHE = os.path.join(OUT, "src_cache")
@@ -161,7 +161,7 @@ def concat_cells(cells, bids):
 
 
 def conformal_q(residuals, alpha=ALPHA):
-    # 同 t4_conformal.conformal_q：ceil((n+1)(1-alpha)) 次序统计量，n 太小时兜底取最大
+    # same formula as t4_conformal.conformal_q: ceil((n+1)(1-alpha)) order statistic, clamped to the max for tiny n
     n = len(residuals)
     idx = min(n - 1, int(np.ceil((n + 1) * (1 - alpha))) - 1)
     return float(np.sort(residuals)[idx])
@@ -169,17 +169,17 @@ def conformal_q(residuals, alpha=ALPHA):
 
 def get_source_model(model_name, seed, Xtr, ytr, Xva, yva, input_dim, device, epochs,
                      horizon=H, cache_dir=None):
-    """源模型按 (model, seed) 落盘缓存。诊断要跑 2 骨干 × 5 种子共 10 次预训练，
-    不缓存的话每次调整诊断口径都要重练源域；缓存后增量分析只是秒级推理。
-    cache_dir 必须显式传入：main 里的 CACHE 是局部变量，模块级 CACHE 只是缺省值，
-    此前 --src-cache 因闭包不可见而静默失效（2026-10-03 修复）。"""
+    """Source model cached per (model, seed). The diagnostics need 2 backbones x 5 seeds = 10 pre-trainings;
+    without a cache every diagnostic tweak would retrain the source domain; with it, incremental analysis is seconds of inference.
+    cache_dir is a required parameter: CACHE in main is a local variable and the module-level CACHE is only a default,
+    which is how --src-cache silently failed before (fixed 2026-10-03)."""
     cache_dir = cache_dir or CACHE
     os.makedirs(cache_dir, exist_ok=True)
-    # 缓存键含 epochs/horizon（改任一口径不会静默复用旧模型）；旧命名作回退以兼容既有缓存
+    # the cache key includes epochs/horizon so changing either convention never silently reuses an old model; the old naming is a fallback for existing caches
     p_new = os.path.join(cache_dir, "src_%s_s%d_ep%d_h%d.pt" % (model_name, seed, epochs, horizon))
     p_old = os.path.join(cache_dir, "t4d_src_%s_s%d.pt" % (model_name, seed))
     p = p_new if os.path.exists(p_new) else (p_old if os.path.exists(p_old) else p_new)
-    set_seed(seed)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    set_seed(seed)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model = new_model(model_name, input_dim).to(device)
     if os.path.exists(p):
         model.load_state_dict(torch.load(p, map_location=device, weights_only=True))
@@ -198,12 +198,12 @@ def main():
     ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--ft-epochs", type=int, default=60)
     ap.add_argument("--horizon", type=int, default=H,
-                    help="超前步长：标签 = 窗口末行后第 H 个循环的 soh")
+                    help="horizon: label = soh at H cycles after the last window row")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--data", default=DATA, help="建模表 csv 路径")
-    ap.add_argument("--out", default="results/conformal", help="结果输出目录")
-    ap.add_argument("--src-cache", default=None, help="统一源模型缓存目录（缺省 <out>/src_cache）")
-    ap.add_argument("--ref-dir", default="results/conformal", help="t4_*.json 参照目录（划分 assert 用）")
+    ap.add_argument("--data", default=DATA, help="modeling-table csv path")
+    ap.add_argument("--out", default="results/conformal", help="results output directory")
+    ap.add_argument("--src-cache", default=None, help="unified source-model cache directory (default <out>/src_cache)")
+    ap.add_argument("--ref-dir", default="results/conformal", help="directory with the t4_*.json references (for the split assertions)")
     args = ap.parse_args()
     CACHE = os.path.join(args.out, "src_cache") if args.src_cache is None else args.src_cache
     OUT = args.out
@@ -226,8 +226,8 @@ def main():
     q_src = conformal_q(src_cal_res)
     print("q_src=%.4f" % q_src, flush=True)
 
-    # 一致性校验：诊断运行的电芯划分必须与论文表 5 用的 t4_*.json 完全一致，
-    # 否则逐电芯结果没法和主表对上。划分由种子唯一决定，理论上必然一致，assert 兜底
+    # consistency check: the cell split of the diagnostic run must match the t4_*.json used for Table 5,
+    # otherwise per-cell results cannot be lined up with the main table. The split follows from the seed alone, so this is a belt-and-braces assert
     ref_p = os.path.join(REF, "t4_%s_s%d.json" % (args.model, args.seed))
     ref = json.load(open(ref_p, encoding="utf-8")) if os.path.exists(ref_p) else None
     if ref is not None and abs(ref["q_src"] - q_src) > 1e-3:
@@ -236,7 +236,7 @@ def main():
 
     results = {"model": args.model, "alpha": ALPHA, "seed": args.seed, "q_src": q_src,
                "horizon": args.horizon, "targets": {}}
-    # 划分与 t4 严格一致：直接从参照 t4_*.json 读取各目标域的 ft/cal/te 数
+    # split strictly identical to t4: read each target domain's ft/cal/te counts from the reference t4_*.json
     _ref_splits = {}
     for tgt_name in ("CALCE", "NASA"):
         _rp = os.path.join(REF, "t4_%s_s%d.json" % (args.model, args.seed))
@@ -262,7 +262,7 @@ def main():
         ft_model = fit_model(ft_model, std_with(sc_tgt, Xft), yft,
                              args.ft_epochs, args.seed, device, lr=3e-4)
 
-        # 校准电芯的部署模型残差（用微调后模型 ft_model，与 t4 校准/评估同源口径一致）
+        # deployed-model residuals on the calibration cells (fine-tuned model ft_model, same same-model convention as t4)
         cal_cells = {}
         for b in cal_b:
             Xc, yc, _ = concat_cells(tgt, [b])
@@ -278,8 +278,8 @@ def main():
             te_cells[b] = {"pred": pred_b.tolist(), "y": yb.tolist(),
                            "res": np.abs(pred_b - yb).tolist()}
 
-        # 逐电芯覆盖率：两条校准路由各算一遍；residuals 存了逐循环残差，
-        # 之后想换诊断指标不用重训
+        # per-cell coverage: computed for both calibration routes; residuals store the per-cycle values,
+        # so later diagnostic changes need no retraining
         per_cell = {}
         for b, d in te_cells.items():
             res = np.asarray(d["res"])
@@ -288,9 +288,9 @@ def main():
                            "cov_tgt": float(np.mean(res <= q_tgt)),
                            "cov_src": float(np.mean(res <= q_src)),
                            "rmse": float(np.sqrt(np.mean(res ** 2)))}
-        # 按电芯聚合的保形变体：三种聚合粒度各试一遍。median 最稳
-        # （对电芯内误差尾部的离群循环不敏感），p90 相当于块内 90 分位，mean 居中。
-        # 注意 q_cell 的 n 只有电芯数（1~2），模块 docstring 里说的"退化"就指这里
+        # per-cell aggregated conformal variants: one run per aggregation level. Median is the most stable
+        # (insensitive to outlier cycles in a cell's error tail); p90 is a within-block 90th percentile; mean sits in between.
+        # Note the n of q_cell is just the cell count (1-2): this is the degeneration the module docstring refers to
         agg_variants = {}
         for agg_name, agg_fn in [("median", lambda r: float(np.median(r))),
                                  ("p90", lambda r: float(np.quantile(r, 0.90))),

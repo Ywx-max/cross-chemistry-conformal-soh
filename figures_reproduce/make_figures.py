@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""论文全部 5 张结果图的复现脚本（与投稿版图件同源，图内文字英文；图 1 框架图见 make_fig_framework.py）。
-数据源：仓库内 results_cx2/（唯一权威副本）；输出：本目录 figures/。
-体例与 make_figures.py 一致（75mm、Arial、英文图内文字、600dpi PNG + 矢量 PDF；
-期刊绘图体例第 2 条：图题中英对照，图内坐标轴标题/图例/图注采用英文）。
+"""Reproduction script for all 5 result figures of the manuscript (same source as the submission figures; English in-figure text; Fig. 1 framework in make_fig_framework.py).
+Data: results_cx2/ inside the repository (the single authoritative copy); output: figures/ in this directory.
+Style as in the submission pipeline (75mm, Arial, English in-figure text, 600 dpi PNG + vector PDF;
+journal figure convention: bilingual captions in the manuscript, English axis titles/legends/annotations inside the figure).
 
-2026-10 P2 修订：
-  P2-2 误差棒改"仅向上"——对称展开的下须会低于轴下限被裁掉，读者读不出下端；
-  P2-3 "Nominal 0.90" 标注从压曲线/柱子的位置移到左上空白区；
-  P2-4 图 3/图 5 的红绿配色改为色盲友好（蓝/橙/灰，与图 2/4/6 一致）。
+2026-10 P2 revision:
+  P2-2 error bars switched to upward-only - symmetric lower whiskers fall below the axis limit and get clipped, so readers cannot see them;
+  P2-3 the "Nominal 0.90" annotation moved from on top of curves/bars to the upper-left blank area;
+  P2-4 Fig. 3/Fig. 5 recoloured red/green to colour-blind friendly blue/orange/grey, matching Fig. 2/4/6.
 """
 import json, os
 import matplotlib
@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 plt.rcParams.update({
-    # 2026-10-03：按《绘图体例》第 5 条“Arial 六号字（7.5 pt）”上调字号
+    # 2026-10-03: font raised to Arial 7.5 pt per the figure conventions (item 5)
     "font.family": "Arial", "font.size": 7.5, "axes.linewidth": 0.6,
     "xtick.direction": "in", "ytick.direction": "in", "xtick.top": True,
     "ytick.right": True, "axes.grid": False, "legend.frameon": False,
@@ -40,15 +40,15 @@ def save(fig, name):
 
 
 def log_yerr(vals, mean_ref):
-    """对数尺度的 +1 标准差（仅向上）。对称展开的下须会低于轴下限而被裁掉
-    （2026-10 P2-2 修订），故下须恒为 0。"""
+    """+1 standard deviation on the log scale (upward only). A symmetric lower whisker would fall
+    below the axis limit and get clipped (2026-10 P2-2 revision), so the lower whisker is always 0."""
     lg = [np.log10(v) for v in vals]
     s = float(np.std(lg, ddof=1))
     lm = np.log10(mean_ref)
     return mean_ref, 0.0, 10 ** (lm + s) - mean_ref
 
 
-# ---------- 图 2: LOBO 逐电芯 RMSE 分布（results_cx2 复算版，与旧图同口径：3 种子合并 357 折） ----------
+# Fig. 2: LOBO per-cell RMSE distribution (results_cx2 recomputation; same scope as the old figure: 3 seeds pooled, 357 folds)
 import statistics
 
 rmses = []
@@ -72,7 +72,7 @@ ax.set_xlim(0, max(rmses) * 1.02)
 fig.tight_layout()
 save(fig, "lobo_distribution")
 
-# ---------- 图 3: 跨化学体系迁移 ----------
+# Fig. 3: cross-chemistry transfer
 d = json.load(open(os.path.join(R, "transfer", "transfer_multiseed_v2.json"), encoding="utf-8"))
 T3B = os.path.join(R, "transfer")
 KMAP = {"zero": "zero_shot", "ft": "fine_tune", "to": "target_only"}
@@ -87,11 +87,11 @@ def per_seed(dom, model, key):
 
 
 groups = ["CALCE_tcn", "CALCE_lstm", "NASA_tcn", "NASA_lstm"]
-# 2026-10-03：图宽按体例收窄至 75 mm 后 4 组横排标签会相互重叠，改为两行显示
+# 2026-10-03: at the 75 mm width the four side-by-side labels overlapped, so the labels are shown on two lines
 glabels = ["CALCE\nTCN", "CALCE\nLSTM", "NASA\nTCN", "NASA\nLSTM"]
 series = [("zero", "Zero-shot", "#3d7ab5"), ("ft", "Fine-tune", "#e8a33d"), ("to", "Target-only", "#7f7f7f")]
 x = np.arange(len(groups)); w = 0.26
-fig, ax = plt.subplots(figsize=(W - 0.08, 2.1))  # 7.5 pt 下紧贴裁剪宽度略超 75 mm，收窄 0.08 in
+fig, ax = plt.subplots(figsize=(W - 0.08, 2.1))  # at 7.5 pt the tight-crop width slightly exceeds 75 mm, so narrow by 0.08 in
 for i, (key, lab, color) in enumerate(series):
     st = [log_yerr(per_seed(*g.split("_"), key), d[g][key]["mean"]) for g in groups]
     means = [s[0] for s in st]
@@ -105,7 +105,7 @@ ax.legend(ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14), columnspacing=
 fig.tight_layout()
 save(fig, "transfer_comparison")
 
-# ---------- 图 5: 保形覆盖 ----------
+# Fig. 5: conformal coverage
 d = json.load(open(os.path.join(R, "conformal", "conformal_multiseed_summary.json"), encoding="utf-8"))
 fig, axes = plt.subplots(1, 2, figsize=(W, 1.9), sharey=True)
 for _i_ax, (ax, domain) in enumerate(zip(axes, ["CALCE", "NASA"])):
@@ -129,13 +129,13 @@ for _i_ax, (ax, domain) in enumerate(zip(axes, ["CALCE", "NASA"])):
             ax.scatter(xi + rng.uniform(-0.06, 0.06, len(vals)), vals, s=3, color="#a86a1a",
                        zorder=3, linewidths=0)
     ax.axhline(0.90, color="black", linestyle="--", linewidth=0.7)
-    # P2-3：标注移至左上空白区（原先压 LSTM 组误差棒）
-    # 2026-10-04 晚：上限 1.12→1.25——1.12 时 (b) NASA 的 TCN 逐种子圆点
-    # （0.85–1.00）仍落入标注文字框（几何检测 3 处重叠）；1.25 留出净空
+    # P2-3: annotation moved to the upper-left blank area (it used to sit on the LSTM error bars)
+    # 2026-10-04 evening: upper limit 1.12 -> 1.25 - at 1.12 the (b) NASA TCN per-seed dots
+    # (0.85-1.00) still fell inside the annotation box (3 geometric overlaps detected); 1.25 clears them
     ax.text(0.04, 0.97, "Nominal 0.90", transform=ax.transAxes, fontsize=7.5, ha="left", va="top")
     ax.set_xticks(x); ax.set_xticklabels(["TCN", "LSTM"])
     ax.set_ylim(0, 1.25)
-    # 2026-10-03：《绘图体例》第 3 条——分图用（a）（b）区分，分图题置于各分图下方
+    # 2026-10-03: subfigures labelled (a)/(b) with subcaptions below each panel, per the figure conventions (item 3)
     ax.text(0.5, -0.235, "(%s) Target: %s" % ("ab"[_i_ax], domain),
             transform=ax.transAxes, ha="center", va="top", fontsize=7.5)
 axes[0].set_ylabel("PICP (empirical coverage)")
@@ -144,7 +144,7 @@ fig.legend(h, l, ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.06))
 fig.tight_layout(rect=(0, 0.07, 1, 0.94))
 save(fig, "conformal_coverage")
 
-# ---------- 图 6: 特征消融 ----------
+# Fig. 6: feature ablation
 d = json.load(open(os.path.join(R, "ablation", "ablation_v3c_multiseed.json"), encoding="utf-8"))
 T3E = os.path.join(R, "ablation")
 KMAP2 = {"zero": "zero_shot", "ft": "fine_tune"}
@@ -175,7 +175,7 @@ ax.legend(ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.13))
 fig.tight_layout()
 save(fig, "feature_ablation")
 
-# ---------- 图 4: 覆盖率-校准电芯数（新增） ----------
+# Fig. 4: coverage vs calibration-cell count (added)
 sw = json.load(open(os.path.join(R, "conformal", "t4_split_sweep", "sweep_summary.json"), encoding="utf-8"))
 fig, ax = plt.subplots(figsize=(W, 2.0))
 marks = {"tcn": ("o", "#3d7ab5", "TCN"), "lstm": ("s", "#e8a33d", "LSTM")}
@@ -187,8 +187,8 @@ for m in ("tcn", "lstm"):
     ax.errorbar(xs, ys, yerr=es, marker=mk, markersize=3.5, color=cl, label=lab,
                 linewidth=0.9, capsize=2, elinewidth=0.6)
 ax.axhline(0.90, color="black", linestyle="--", linewidth=0.7)
-# 2026-10-04：纵轴改按新数据自适应（误差棒最低 0.6366、最高 0.9685，取 0.62–1.00
-# 保证全部误差棒完整；旧固定 0.5–1.05 下部大片空白、趋势不可辨）
+# 2026-10-04: y-axis now adapts to the data (error bars span 0.6366-0.9685; 0.62-1.00 keeps every whisker intact,
+# whereas the old fixed 0.5-1.05 left a large blank region below and made the trend unreadable)
 ax.text(1.05, 0.978, "Nominal 0.90", fontsize=7.5, ha="left", va="top")
 ax.set_xlabel("Number of calibration cells")
 ax.set_ylabel("PICP (target-calibrated)")
@@ -198,4 +198,4 @@ ax.legend(loc="lower right")
 fig.tight_layout()
 save(fig, "calibration_sweep")
 
-print("全部完成 ->", OUT)
+print("all done ->", OUT)

@@ -1,39 +1,39 @@
 # -*- coding: utf-8 -*-
-"""持久基线（2026-10-04 修订清单 A4）：跨化学迁移实验的朴素对照，务必固化。
+"""Persistence baseline (2026-10-04 checklist A4): the naive control of the cross-chemistry experiments, pinned here.
 
-定义（与 t3b/t4 同窗口口径）：窗口 = 每颗电芯连续 20 个循环（窗口末行下标 i），
-标签 = 第 i+H 个循环的 soh，且 cyc[i+H] == cyc[i]+H（循环连续性检查与
-t3b_std_local.build_windows_ds 一致，寿命末端不足 H 步的窗口丢弃）。
-持久基线预测 = 窗口末行 soh（"SOH 短期近似不变"），不训练任何参数。
+Definition (same window convention as t3b/t4): a window is 20 consecutive cycles of one cell (last row index i);
+the label is the soh at cycle i+H with cyc[i+H] == cyc[i]+H (the continuity check matches
+t3b_std_local.build_windows_ds; windows closer than H steps to the record end are dropped).
+The persistence prediction is the last-row soh of the window (SOH is locally near-constant); no parameters are trained.
 
-输出两部分：
-  1) 全目标域电芯池化的 persistence RMSE（H=5/10/20 × CALCE/NASA）——表 3 表注引用；
-  2) 逐种子配对：与 results_cx2/transfer/t3b_*.json 的 test_cells 同集合、同窗口，
-     对模型 zero/ft RMSE 与 persistence 同种子之差做配对 t 检验（n=5，带符号 t），
-     并统计模型 RMSE < persistence 的种子数（胜场）。
+Two outputs:
+  1) pooled persistence RMSE over all target-domain cells (H=5/10/20 x CALCE/NASA), cited in the Table 3 note;
+  2) per-seed pairing: same test_cells and windows as results_cx2/transfer/t3b_*.json,
+     paired t-test on the same-seed differences of zero/ft RMSE vs persistence (n=5, signed t),
+     counting seeds where the model beats persistence (wins).
 
     python code/checks/persistence_baseline.py
-输出: results_cx2/transfer/persistence_baseline.json（stdout 同步打印）
+Output: results_cx2/transfer/persistence_baseline.json (also printed to stdout)
 """
 import csv, json, math, statistics as st
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data" / "建模表_v3_cx2.csv"
+DATA = ROOT / "data" / "modeling_table_v3_cx2.csv"
 RES = ROOT / "results_cx2" / "transfer"
 WINDOW = 20
 HS = (5, 10, 20)
 
-# Codex 咨询文档（20261003）参考值（全电芯口径 H=5/10/20）。
-# 2026-10-04 复算结论：NASA 池化口径 3/3 命中参考值；配对检验 t 值亦命中
-# （NASA/TCN H=10 t=-1.43 胜 3/5）。CALCE 池化比参考值高约 7%（对模型更不利、
-# 属保守方向）：参考值与"逐电芯宏平均 sqrt(mean(mse_i))"接近（H=5 差 0.0001，
-# H=10/20 差 0.0009/0.0020），但无任何单一口径可同时精确复现两域全部参考值，
-# 且参考文档未记录口径。本脚本主口径取"全电芯池化"——与 t3b eval_model 的
-# concat 池化评测严格一致，保证与模型 RMSE 可比；宏平均作为副口径一并输出。
-# 2026-10-04 晚注：下方 REF 为外部参考文档的**初始参考值**（口径未记录）；
-# 窗口连续性修正后的复算主口径值为 CALCE 0.0665/0.0832/0.1066（H=5/10/20），
-# 即论文所报值；两者差异为口径差异（约 +7%），非计算不符。
+# Reference values from an external consultation note (2026-10-03), all-cell scope, H=5/10/20.
+# 2026-10-04 recomputation: NASA pooled values hit 3/3 references; paired t values also match
+# (NASA/TCN H=10: t=-1.43, 3/5 wins). CALCE pooled values exceed the references by about 7% (harder on the model,
+# i.e. the conservative direction): the references are close to the per-cell macro mean sqrt(mean(mse_i))
+# (H=5 differs by 0.0001, H=10/20 by 0.0009/0.0020), but no single convention reproduces all references
+# of both domains exactly, and the note does not record its convention. The primary convention here is
+# all-cell pooling, matching the concat pooling of t3b eval_model so the RMSEs are comparable with the
+# model; the macro mean is reported as a secondary view. Note (2026-10-04): REF below holds the initial
+# reference values (convention unrecorded); after the window-continuity fix the primary values are
+# CALCE 0.0665/0.0832/0.1066 (H=5/10/20), the values reported in the manuscript; the gap to REF is a convention difference (about +7%), not a computation error.
 REF = {"CALCE": {5: 0.0609, 10: 0.0761, 20: 0.0977},
        "NASA": {5: 0.0181, 10: 0.0269, 20: 0.0461}}
 
@@ -85,7 +85,7 @@ def betai(a, b, x):
 
 
 def paired_t_p_signed(xs, ys):
-    """带符号配对 t：t>0 表示 xs 均值大于 ys（模型差于持久基线）。"""
+    """Signed paired t: t>0 means xs mean exceeds ys (model worse than persistence)."""
     d = [x - y for x, y in zip(xs, ys)]
     n = len(d)
     m = st.mean(d)
@@ -117,8 +117,8 @@ def load_cells():
 
 
 def win_pairs(cyc, y, H):
-    # 窗口连续 且 窗口到标签连续，与 t3b_std_local.build_windows_ds 完全一致
-    # （2026-10-04 修正：原实现漏了窗口内连续性，窗口集合比模型多约 3.5%）
+    # continuity within the window and from window to label, matching t3b_std_local.build_windows_ds
+    # (2026-10-04 fix: the original missed in-window continuity and used about 3.5% more windows)
     out = []
     for i in range(WINDOW - 1, len(y) - H):
         if cyc[i] - cyc[i - WINDOW + 1] == WINDOW - 1                 and cyc[i + H] == cyc[i] + H:
@@ -140,7 +140,7 @@ def pooled_rmse(cells, dom, H, bids=None):
 
 
 def macro_rmse(cells, dom, H, bids=None):
-    """副口径：逐电芯 RMSE² 等权平均再开方（宏平均，每颗电芯等权）。"""
+    """Secondary view: equal-weight mean of per-cell RMSE^2, then square root (macro mean, one weight per cell)."""
     per = []
     for (ds, bid), (cyc, y) in cells.items():
         if ds != dom:
@@ -155,9 +155,9 @@ def macro_rmse(cells, dom, H, bids=None):
 
 def main():
     cells = load_cells()
-    print(f"建模表电芯数: {len(cells)}")
+    print(f"cells in modeling table: {len(cells)}")
 
-    # 1) 全电芯 persistence：主口径=池化（与模型评测一致），副口径=宏平均
+    # 1) all-cell persistence: primary = pooled (matches model evaluation), secondary = macro mean
     allcell = {}
     for dom in ("CALCE", "NASA"):
         allcell[dom] = {}
@@ -165,13 +165,13 @@ def main():
             rmse, n = pooled_rmse(cells, dom, H)
             macro, _ = macro_rmse(cells, dom, H)
             ref = REF[dom][H]
-            flag = "OK" if abs(rmse - ref) <= 5e-4 else f"与外部初始参考值 {ref} 差 {rmse - ref:+.4f}（口径差异，见脚本注释）"
+            flag = "OK" if abs(rmse - ref) <= 5e-4 else f"differs from initial reference {ref} by {rmse - ref:+.4f} (convention difference, see header comment)"
             allcell[dom][H] = {"rmse": round(rmse, 6), "macro_rmse": round(macro, 6),
                                "n_windows": n, "ref": ref, "check": flag}
-            print(f"[全电芯] {dom} H={H:2d} persistence 池化RMSE={rmse:.4f} "
-                  f"(宏平均 {macro:.4f}, 窗口 {n})  {flag}")
+            print(f"[all cells] {dom} H={H:2d} pooled persistence RMSE={rmse:.4f} "
+                  f"(macro mean {macro:.4f}, windows {n})  {flag}")
 
-    # 2) 逐种子配对（t3b 同 test_cells）；h5/h20 敏感性实验仅 TCN，pattern 写死 tcn
+    # 2) per-seed pairing (t3b test_cells); the h5/h20 sensitivity runs are TCN-only, so pattern is fixed to tcn
     paired = {}
     jobs = [("h10", RES / "t3b_{m}_s{s}.json", (10,), ("tcn", "lstm")),
             ("h5", ROOT / "results_cx2" / "transfer_sens_h5" / "t3b_tcn_s{s}.json", (5,), ("tcn",)),
@@ -183,7 +183,7 @@ def main():
                 for s in (42, 43, 44, 45, 46):
                     p = Path(str(pat).format(m=model, s=s))
                     if not p.exists():
-                        raise FileNotFoundError(f"t3b 结果缺失: {p}")
+                        raise FileNotFoundError(f"t3b result missing: {p}")
                     j = json.load(open(p, encoding="utf-8"))
                     if j["horizon"] != H:
                         continue
@@ -191,7 +191,7 @@ def main():
                     per_seed.append(j)
                 if not per_seed:
                     continue
-                # 每个 t3b json 含两个目标域，逐域配对
+                # each t3b json holds two target domains; pair per domain
                 for dom in ("CALCE", "NASA"):
                     pers_by_seed = []
                     for j in per_seed:
@@ -210,13 +210,13 @@ def main():
                         }
 
     out = {"all_cell": allcell, "paired": paired,
-           "note": "paired.t>0 = 模型均值差于持久基线；model_wins = 模型 RMSE 更小的种子数"}
+           "note": "paired.t>0 = model mean worse than persistence; model_wins = seeds with lower model RMSE"}
     dst = RES / "persistence_baseline.json"
     with open(dst, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=1, ensure_ascii=False)
     print("saved:", dst)
     for k, v in paired.items():
-        print(f"{k:28s} t={v['t']:+.2f} p={v['p']:.3f} 胜 {v['model_wins']}/5")
+        print(f"{k:28s} t={v['t']:+.2f} p={v['p']:.3f} wins {v['model_wins']}/5")
 
 
 if __name__ == "__main__":

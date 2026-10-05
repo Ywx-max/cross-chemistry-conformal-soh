@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""CALCE 统一提取 v2：每循环一行 = 容量(电流积分) + ICA 形状 + 放电 v_q 特征。
+"""Unified CALCE extraction v2: one row per cycle = capacity (current-integrated) + ICA shape + discharge v_q features.
 
-相比 parse_calce.py 的三点改进：
-1. 容量改用放电步电流积分，不再依赖各家的容量列（txt 的 Capacity 列在状态
-   切换行会取错值出 NaN；部分 xlsx 干脆缺 Discharge_Capacity 列）
-2. 除 ICA 主峰外还挖了形状特征：主峰位置、次峰、半高宽。后面消融实验的
-   "曲线增强 13 维"（历史名 curve14）里那几个 curve 特征就是从这里来的
-3. 特征与容量分开算再按放电循环顺序对齐（两者循环数偶尔不一致时取交集并告警）
+Three improvements over parse_calce.py:
+1. capacity now comes from integrating the discharge current rather than each vendor's capacity column (the txt
+   Capacity column takes wrong values on state-switch rows and yields NaN; some xlsx files lack Discharge_Capacity entirely)
+2. beyond the ICA main peak it also mines shape features: main-peak position, secondary peak, FWHM. The curve
+   features of the later ablation ("curve-13", historical name curve14) come from here
+3. features and capacity are computed separately and aligned by discharge-cycle order (intersecting with a warning when the counts differ)
 
-本脚本产出 calce_full_v2.csv；v1 保留作中间产物出处。
-xlsx 引擎用的 calamine（pip install python-calamine）：官方 openpyxl 对这批
-文件又慢又偶尔报错，calamine 快一个数量级还更稳。"""
+This script produces calce_full_v2.csv; v1 is kept as the intermediate artifact.
+The xlsx engine is calamine (pip install python-calamine): stock openpyxl is slow and occasionally fails on
+these files, while calamine is an order of magnitude faster and steadier."""
 import io, time, zipfile
 from pathlib import Path
 import numpy as np
@@ -19,8 +19,8 @@ import pandas as pd
 CAL = Path("data/raw/calce")
 OUT = Path("data")
 V_LO, V_HI, DV = 3.90, 4.19, 0.010
-# 额定容量按电芯系列区分（2026-10 CX2 扩充，与 parse_calce.py 同口径）：
-# txt 路径容量 = 放电深度百分比 × 额定容量，CS2=1.1 Ah、CX2=1.35 Ah
+# rated capacity differs per cell series (2026-10 CX2 extension, same scope as parse_calce.py):
+# txt-path capacity = depth-of-discharge percent x rated capacity, CS2=1.1 Ah, CX2=1.35 Ah
 RATED_BY_PREFIX = {"CS2": 1.1, "CX2": 1.35}
 QFRACS = [0.1, 0.3, 0.5, 0.7, 0.9]
 
@@ -29,8 +29,8 @@ def rated_for(cell):
     return RATED_BY_PREFIX[cell.split("_")[0]]
 
 def ica_curve(v, i, t):
-    """一段充电数据 → (分箱后电压中心, dQ/dV)。CC 过滤 + 单调化 + 10mV 分箱，
-    与 v1 同一套流水线；返回曲线而不是峰值，让调用方自己挖形状特征。"""
+    """One charging segment -> (binned voltage centres, dQ/dV). CC filter + monotonisation + 10 mV binning,
+    the same pipeline as v1; returns the curve rather than a peak so callers can mine shape features themselves."""
     if len(t) < 30: return None
     thr = 0.7 * np.median(np.abs(i))
     m = np.abs(i) >= thr
@@ -58,9 +58,9 @@ def ica_curve(v, i, t):
     return centers[mask], ica[mask]
 
 def ica_shape(centers, ica):
-    """从 ICA 曲线挖形状：主峰高度/位置、半高宽、次峰。
-    次峰的做法：主峰 ±8 个 bin 强行置零后再取最大。简单粗暴，但对
-    "主峰旁边的肩峰"足够用（我们要的是趋势特征，不是谱学精度）。"""
+    """Mine shape from an ICA curve: main-peak height/position, FWHM, secondary peak.
+    Secondary peak: force the main peak +/-8 bins to zero, then take the maximum. Crude, but
+    good enough for "shoulder peaks next to the main peak" (we want trend features, not spectroscopic precision)."""
     pk = int(np.argmax(ica)); h = ica[pk]; half = h / 2.0
     lo = pk
     while lo > 0 and ica[lo] > half: lo -= 1
@@ -73,10 +73,10 @@ def ica_shape(centers, ica):
             "ica2_peak": float(ica2[int(np.argmax(ica2))]), "ica_fwhm": float(fwhm)}
 
 def dch_curve_feats(v, i, t):
-    """放电段特征：定分数容量电压点 v_q10~q90（容量走到 10%~90% 时的电压）+
-    放电段 ICA（2.0-3.5V 窗、3mV 网格）的次峰与半高宽。
-    v_q 系列是曲线增强特征的另一半：容量归一化后插值取电压，
-    本质是"放电曲线形状的低维摘要"。"""
+    """Discharge-segment features: fixed-quantile capacity-voltage points v_q10-q90 (voltage at 10%-90% of
+    capacity) + secondary peak and FWHM of the discharge ICA (2.0-3.5 V window, 3 mV grid).
+    The v_q family is the other half of the curve-enhanced features: normalise capacity, interpolate voltage,
+    i.e. a low-dimensional digest of the discharge-curve shape."""
     dt = np.diff(t)
     q = np.concatenate([[0], np.cumsum(np.abs(i[1:]) * dt)]) / 3600.0
     if q[-1] < 0.2: return {}
@@ -120,8 +120,8 @@ def process_xlsx_cell(zip_path, cell):
                     if (sg['Current(A)'] < 0).any():
                         dd = sg[sg['Current(A)'] < 0]
                         rec.update(dch_curve_feats(dd['Voltage(V)'].values, dd['Current(A)'].values, dd['Test_Time(s)'].values))
-                        # 此行保留占位逻辑（恒不赋值）：xlsx 容量统一由
-                        # process_xlsx_capacity 用电流积分计算，见其 docstring
+                        # placeholder logic kept on this line (never assigns): xlsx capacity is always
+                        # computed by process_xlsx_capacity via current integration, see its docstring
                         rec["capacity_Ah"] = float(dd['Test_Time(s)'].iloc[-1]*0 + dd['Current(A)'].abs().max()*0) if False else rec.get("capacity_Ah")
                     if (sg['Current(A)'] > 0).any():
                         cc = sg[sg['Current(A)'] > 0]
@@ -132,9 +132,9 @@ def process_xlsx_cell(zip_path, cell):
     return pd.DataFrame(list(rows_by_gid.values()))
 
 def process_xlsx_capacity(zip_path, cell):
-    """xlsx 容量：放电步电流积分（|I|·dt 累加）。
-    单独一个函数而不是塞进 process_xlsx_cell，是因为两遍遍历的 groupby 键不同：
-    特征按 (Cycle,Step) 挖、容量只在放电步算，混在一起会把 offset 逻辑搅乱。"""
+    """xlsx capacity: integrate the discharge-step current (accumulate |I|*dt).
+    A separate function instead of living inside process_xlsx_cell because the two passes group by different keys:
+    features by (Cycle,Step), capacity on discharge steps only; mixing them would tangle the offset logic."""
     out = []
     offset = 0
     with zipfile.ZipFile(zip_path) as z:
@@ -158,8 +158,8 @@ def process_xlsx_capacity(zip_path, cell):
     return pd.DataFrame({"battery_id": cell, "gid": s.index, "capacity_Ah_int": s.values})
 
 def process_txt_cell(zip_path, cell):
-    """CADEX txt 版（CS2_8/21）。与 v1 的状态机相同，区别是容量取放电步
-    Capacity 列的最后一个稳定值（/100×额定），放电 v_q 特征同步挖出。"""
+    """CADEX txt variant (CS2_8/21). Same state machine as v1; capacity is the last stable value of the
+    Capacity column on the discharge step (/100 x rated), and the discharge v_q features are mined alongside."""
     rows_by_gid = {}
     n_cyc, state = 0, 'rest'
     v_buf, i_buf, t_buf = [], [], []
@@ -208,20 +208,20 @@ def process_txt_cell(zip_path, cell):
 def main():
     frames = []
     t0 = time.time()
-    # 2026-10 CX2 扩充（与 parse_calce.py 同一纳入/排除清单）
+    # 2026-10 CX2 extension (same inclusion/exclusion list as parse_calce.py)
     xlsx_cells = ['CS2_33', 'CS2_34', 'CS2_35', 'CS2_36', 'CS2_37', 'CS2_38',
                   'CX2_16', 'CX2_33', 'CX2_34', 'CX2_35', 'CX2_36', 'CX2_37', 'CX2_38']
     txt_cells = ['CS2_8', 'CS2_21', 'CX2_31']
     for cell in xlsx_cells:
         f_feat = process_xlsx_cell(CAL/f'{cell}.zip', cell)
         f_cap = process_xlsx_capacity(CAL/f'{cell}.zip', cell).rename(columns={"gid": "cycle", "capacity_Ah_int": "capacity_Ah"})
-        # 顺序对齐：特征流与容量流都按放电循环先后产生，第 k 个对第 k 个。
-        # v_q10 缺失的循环说明放电段太短挖不出特征，从特征流里剔掉再对齐
+        # order alignment: the feature stream and the capacity stream are both produced in discharge-cycle order,
+        # k-th to k-th. Cycles without v_q10 (discharge too short for features) are removed from the feature stream first
         f_feat_d = f_feat[f_feat["v_q10"].notna()].sort_values("cycle").reset_index(drop=True)
         f_cap_s = f_cap.sort_values("cycle").reset_index(drop=True)
         n = min(len(f_feat_d), len(f_cap_s))
         if len(f_feat_d) != len(f_cap_s):
-            print(f"  [警告] {cell}: 特征循环 {len(f_feat_d)} vs 容量循环 {len(f_cap_s)}, 按顺序取前 {n}")
+            print(f"  [warning] {cell}: feature cycles {len(f_feat_d)} vs capacity cycles {len(f_cap_s)}, taking the first {n}")
         f_feat_d = f_feat_d.iloc[:n]
         f_feat_d["capacity_Ah"] = f_cap_s["capacity_Ah"].values[:n]
         f_feat_d["battery_id"] = cell
@@ -232,7 +232,7 @@ def main():
         m = process_txt_cell(CAL/f'{cell}.zip', cell)
         m["soh"] = m["capacity_Ah"] / m["capacity_Ah"].dropna().iloc[0]
         frames.append(m)
-        print(f"{cell}: {len(m)} rows | ica中位 {m['ica_main_peak'].median():.2f} | v_q50中位 {m['v_q50'].median():.3f}", flush=True)
+        print(f"{cell}: {len(m)} rows | ica median {m['ica_main_peak'].median():.2f} | v_q50 median {m['v_q50'].median():.3f}", flush=True)
     cal = pd.concat(frames, ignore_index=True)
     cal.to_csv(OUT / 'calce_full_v2.csv', index=False, encoding='utf-8-sig')
     print(f'UNIFIED: {OUT / "calce_full_v2.csv"} ({len(cal)} rows, {time.time()-t0:.0f}s)')

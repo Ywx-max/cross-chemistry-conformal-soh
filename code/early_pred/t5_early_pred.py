@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""早期寿命预测（论文 4.8）：只用前 100 个循环的信息预测整条寿命。
+"""Early-life prediction (Section 4.8): predict whole-life from the first 100 cycles only.
 
-思路照 Severson 等 2019 的差分容量曲线：取循环 10 与循环 100 的放电电压-容量曲线相减，
-在 ΔQ(V) 上取 6 个统计量（方差、均值、斜率、截距、最小、最大）作特征，
-岭回归回归 log10(寿命)，评估用留一电芯——119 颗有寿命标签的电芯逐颗留出。
+Following the differential-capacity idea of Severson et al. 2019: subtract the discharge voltage-capacity curves
+of cycles 10 and 100 and take 6 statistics of Delta-Q(V) (variance, mean, slope, intercept, min, max) as features,
+regress log10(life) with ridge, and evaluate leave-one-cell-out over the 119 cells that carry life labels.
 
-固定设置：特征先标准化，Ridge(alpha=1.0)，目标 log10(cycle_life)。这套参数是在公开数据上
-试出来的默认值（没有做超参搜索），因此本基线是确定性单次运行，不涉及随机种子。
+Fixed settings: features standardised first, Ridge(alpha=1.0), target log10(cycle_life). These are defaults tried
+out on the public data (no hyperparameter search), so the baseline is a deterministic single run with no random seeds.
 
-输入：data/mit_dq_early.csv（ΔQ 特征表，由公开 MIT-Stanford 数据按上式提取，随仓库提供）
-输出：results/early_pred_summary.json、results/early_pred_results.csv（逐电芯预测明细）
+Input: data/mit_dq_early.csv (Delta-Q feature table extracted from the public MIT-Stanford data as above, shipped with the repository)
+Output: results/early_pred_summary.json, results/early_pred_results.csv (per-cell predictions)
 
     python t5_early_pred.py
 """
@@ -33,7 +33,7 @@ def main():
     X = df[FEATURES].to_numpy(dtype=float)
     y_log = np.log10(df["cycle_life"].to_numpy(dtype=float))
 
-    # 留一电芯：每颗电芯当一次测试集，其余 118 颗训练
+    # leave one cell out: each cell serves once as the test set while the other 118 train
     pred_cycles = np.empty(len(df))
     for i in range(len(df)):
         train = np.arange(len(df)) != i
@@ -61,10 +61,10 @@ def main():
         "pred_cycle_life": pred_cycles,
     }).to_csv(OUT_DIR / "early_pred_results.csv", index=False)
 
-    print("电芯数: %d" % summary["n"])
-    print("log10 空间 RMSE : %.4f" % summary["rmse_log"])
-    print("循环数空间 RMSE : %.1f" % summary["rmse_cycles"])
-    print("逐电芯相对误差  : %.2f%%" % summary["rel_err_pct"])
+    print("cells: %d" % summary["n"])
+    print("log10-space RMSE : %.4f" % summary["rmse_log"])
+    print("cycle-space RMSE : %.1f" % summary["rmse_cycles"])
+    print("per-cell relative error : %.2f%%" % summary["rel_err_pct"])
 
 
 if __name__ == "__main__":

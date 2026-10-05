@@ -1,91 +1,100 @@
-# results/ 结果数据说明
+# results/ - experiment outputs
 
-论文全部实验结果（实验脚本的原始输出 JSON）。每个文件都能在论文里找到对应位置，
-`code/checks/final_data_check.py`（75 项，作者本地自检）与 `code/checks/verify_results.py`
-（179 项，只读本目录、无需论文源文件，可直接运行）就是拿这些文件跟论文数字逐项对拍的；
-汇总文件可由 `code/checks/aggregate_results.py` 从逐种子文件再生。
+Raw JSON outputs of all experiments behind the manuscript. Every file maps to a place in the
+paper: `code/checks/final_data_check.py` (75 itemized checks, author-local) and
+`code/checks/verify_results.py` (179 checks, reads only this directory, no manuscript sources
+needed) compare them against the reported numbers; summary files can be regenerated from the
+per-seed files with `code/checks/aggregate_results.py`.
 
-## baselines/ 源域基线
+## baselines/ - source-domain baselines
 
-| 文件 | 对应论文 |
+| File | Manuscript |
 |---|---|
-| baseline_3seed_final.json | 表 1，四骨干 5 折组交叉验证（3 种子；± 为种子间样本标准差 ddof=1） |
-| lobo_tcn.jsonl | 表 2 的 TCN 行（原始运行，119 折，每行一折） |
-| lobo_tcn_s42/43/44.jsonl | 图 2 的 357 折合并分布 + 4.2 节的跨种子复核（复现运行，每行一折） |
-| lobo_lstm.jsonl / lobo_transformer.jsonl | 表 2 的 LSTM / Transformer 行（各 119 折，原运行） |
-| lobo_final_multiseed.json | 4.2 节跨种子复核（TCN 3 次重复 92.45±0.98；LSTM/Transformer 仅原运行 n_runs=1） |
-| lobo_3model_final.csv | 表 2 末行"逐电芯三模型择优（上界）"的逐电芯 RMSE 数据 |
+| baseline_3seed_final.json | Table 1, four backbones x 5-fold group CV (3 seeds; +/- is the sample std over seeds, ddof=1) |
+| lobo_tcn.jsonl | Table 2, TCN row (original run, 119 folds, one per line) |
+| lobo_tcn_s42/43/44.jsonl | 357-fold pooled distribution of Fig. 2 plus the Section 4.2 cross-seed check (reproduction runs) |
+| lobo_lstm.jsonl / lobo_transformer.jsonl | Table 2, LSTM / Transformer rows (119 folds each, original run) |
+| lobo_final_multiseed.json | Section 4.2 cross-seed check (TCN repeated 3 times, 92.45 +/- 0.98; LSTM/Transformer original single run) |
+| lobo_3model_final.csv | Per-cell RMSEs of the last Table 2 row (per-cell best-of-three upper bound) |
 
-> 说明：汇总文件只包含有逐折原始文件（jsonl）支撑的运行。"LSTM/Transformer/
-> 集成各 2 次重复"因缺少 jsonl 支撑而未纳入（aggregate_results.py 仅再生有支撑的部分）。
+> Note: summaries only cover runs that have per-fold jsonl files; "LSTM/Transformer/ensemble,
+> 2 repeats each" is omitted for lack of jsonl support (aggregate_results.py regenerates only
+> the supported parts).
 
-## transfer/ 跨化学体系迁移
+## transfer/ - cross-chemistry transfer
 
-| 文件 | 对应论文 |
+| File | Manuscript |
 |---|---|
-| transfer_multiseed_v2.json | 表 3 + 图 3，三机制对照（5 种子） |
-| raw_protocol_multiseed.json | 表 4 首行口径，原始协议漂移（5 种子 42-46） |
-| t3_soh_tcn_s42-46.json | 表 4 逐种子原始输出（原始协议，t3_transfer_local.py 产物） |
-| t3b_tcn/lstm_s42-46.json | 表 3 逐种子原始输出（逐数据集标准化协议，t3b_std_local.py 产物） |
-| t3b_tcn_s42_repeat1/2.json | 4.9 节同种子两次独立执行的重复对（CALCE 零样本 RMSE 相差 14%，GPU 非确定性实证） |
-| t3_rul_tcn_s42.json | RUL 口径对照（3.1 节末尾提到 SOH 作迁移评估目标的依据） |
+| transfer_multiseed_v2.json | Table 3 + Fig. 3, three mechanisms (5 seeds) |
+| raw_protocol_multiseed.json | First row of Table 4, original-protocol drift (seeds 42-46) |
+| t3_soh_tcn_s42-46.json | Table 4 per-seed raw outputs (original protocol, from t3_transfer_local.py) |
+| t3b_tcn/lstm_s42-46.json | Table 3 per-seed raw outputs (per-dataset standardization, from t3b_std_local.py) |
+| t3b_tcn_s42_repeat1/2.json | Section 4.9 repeat pair of the same seed (CALCE zero-shot RMSE differs by 14%, GPU nondeterminism) |
+| t3_rul_tcn_s42.json | RUL-scope control (basis for using SOH as the transfer target, end of Section 3.1) |
 
-> 口径提示：表 3（论文主表）= 逐数据集标准化协议 = t3b 文件；表 4 首行 = 原始协议
-> = t3_soh 文件。
+> Scope note: Table 3 (main table) = per-dataset standardization = t3b files; first row of
+> Table 4 = original protocol = t3_soh files.
 
-## ablation/ 特征丰富度消融
+## ablation/ - feature-richness ablation
 
-| 文件 | 对应论文 |
+| File | Manuscript |
 |---|---|
-| ablation_v3c_multiseed.json | 表 6 + 图 6（v3c 版建模表，论文采用） |
-| ablation_multiseed.json / ablation_multiseed_v5.json | 数据版本对照存档（v3 / v5 建模表；论文未直接引用其数值） |
-| t3c/t3d/t3e_*_s42-46.json | 三个数据版本的逐种子原始输出（base7 / curve14 两组） |
+| ablation_v3c_multiseed.json | Table 6 + Fig. 6 (v3c modeling table, used in the paper) |
+| ablation_multiseed.json / ablation_multiseed_v5.json | Data-version comparison archive (v3 / v5 tables; values not cited) |
+| t3c/t3d/t3e_*_s42-46.json | Per-seed raw outputs of the three data versions (base7 / curve14 groups) |
 
-## conformal/ 保形区间
+## conformal/ - conformal intervals
 
-| 文件 | 对应论文 |
+| File | Manuscript |
 |---|---|
-| conformal_multiseed_summary.json | 表 5 + 图 5，双路由对照（5 种子） |
-| t4c_multiseed_summary.json | 4.5 节条件化收窄（Mondrian / 加权，负结果） |
-| t4_tcn/lstm_s42-46.json | 表 5 的逐种子原始输出（含逐电芯残差向量） |
-| t4c_mondrian_s42-46.json / t4c_weighted_s42-46.json | 4.5 节扩展实验的逐种子输出 |
-| t4d_per_cell_tcn/lstm_s42-46.json | 4.6 节补充诊断（逐电芯覆盖率、逐循环残差、聚合保形变体） |
+| conformal_multiseed_summary.json | Table 5 + Fig. 5, dual-route comparison (5 seeds) |
+| t4c_multiseed_summary.json | Section 4.5 conditional narrowing (Mondrian / weighted, negative result) |
+| t4_tcn/lstm_s42-46.json | Table 5 per-seed raw outputs (with per-cell residual vectors) |
+| t4c_mondrian_s42-46.json / t4c_weighted_s42-46.json | Per-seed outputs of the Section 4.5 extensions |
+| t4d_per_cell_tcn/lstm_s42-46.json | Section 4.6 diagnostics (per-cell coverage, per-cycle residuals, aggregated conformal variants) |
 
-> 口径说明：t4_*.json / t4d_*.json 中的目标域校准分位数，由部署模型自身在校准
-> 电芯上的残差计算，与覆盖评估同源（拆分保形的前提）；逐电芯残差向量随 JSON 保存。
-> t4c_weighted_*.json 同批重跑（移除测试真值泄漏 + 修正加权分位数 off-by-one）；
-> t4c_mondrian_*.json 无缺陷、保留原始运行。
+> Scope note: the target-domain calibration quantile in t4_*.json / t4d_*.json is computed from
+> the deployed model's own residuals on the calibration cells, the same-model premise of split
+> conformal; per-cell residual vectors are stored with the JSON. t4c_weighted_*.json was rerun
+> after removing a test-label leak and fixing an off-by-one in the weighted quantile;
+> t4c_mondrian_*.json was defect-free and keeps the original run.
 
-## 补充实验（论文 4.5/4.9 节引用）
+## Supplementary experiments (cited in Sections 4.5/4.9)
 
-| 文件 | 说明 |
+| File | Description |
 |---|---|
-| t4_split_sweep/ | 覆盖率-校准电芯数扫描（`t4_conformal_local.py --n-cal`）：测试电芯固定 7，校准电芯 1→5 档，微调电芯相应 8→4，2 骨干 × 5 种子；`sweep_summary.json` 为聚合 |
-| t4_gru_s42-46.json | GRU 骨干的稳健性复核（双路由，5 种子，源域预训练同协议重跑） |
-| diag_deterministic/ | 跨管线复现性诊断：t3b/t3e 同种子 `--deterministic` 开关重跑对照（正文 4.9 引用） |
+| t4_split_sweep/ | coverage vs calibration-cell count (`t4_conformal_local.py --n-cal`): 7 test cells fixed, calibration cells 1 to 5, fine-tuning cells 8 down to 4, 2 backbones x 5 seeds; sweep_summary.json aggregates |
+| t4_gru_s42-46.json | GRU backbone robustness check (dual route, 5 seeds, source pre-training rerun under the same protocol) |
+| diag_deterministic/ | cross-pipeline reproducibility diagnostics: t3b/t3e reruns with `--deterministic` (cited in Section 4.9) |
 
-## 其他
+## Other
 
-- `early_pred_summary.json` / `early_pred_results.csv`：4.8 节早期寿命预测（ΔQ 特征 + 岭回归，逐电芯预测明细 119 颗；log10 RMSE 0.117 / 循环 RMSE 141.7 / MAPE 19.5%；脚本 `code/early_pred/t5_early_pred.py`）
+- `early_pred_summary.json` / `early_pred_results.csv`: Section 4.8 early-life prediction (dQ
+  features + ridge regression, per-cell details for 119 cells; log10 RMSE 0.117 / cycle RMSE
+  141.7 / MAPE 19.5%; script `code/early_pred/t5_early_pred.py`)
 
-## 口径提示
+## Conventions
 
-- 逐种子文件用种子号命名（s42-s46）；论文表格除 LOBO 单次运行外均报 5 种子（42-46）
-- 全文 ± 为样本标准差（ddof=1）
-- 表 3 的增益比是逐种子（基线/微调）再平均，不是两列均值相除；重尾分布下中位数口径更保守（4.3 有并列披露）
-- 表 5 的划分硬编码（CALCE 7/2/7，NASA 2/1/1）；Mondrian / 加权用 1/3 三分协议（CALCE 5/5/6）；
-  每种子的划分随种子重新抽取，± 同时反映训练随机性与划分差异
-- 同种子重跑会有小幅浮动（GPU 非确定性），零点几到几个百分点的差异属正常范围（论文 4.9）。
-  全部脚本共用同一批 MIT 预训练权重（统一源模型缓存），同配置数值不存在管线间分歧。
+- Per-seed files are named by seed (s42-s46); manuscript tables report 5 seeds (42-46) except
+  single-run LOBO cells
+- +/- is the sample standard deviation (ddof=1) throughout
+- Table 3 gain ratios are per-seed ratios averaged afterwards, not ratios of column means; the
+  median basis is the more conservative view under the heavy tail (disclosed in Section 4.3)
+- Table 5 splits are hard-coded (CALCE 7/2/7, NASA 2/1/1); Mondrian / weighted use the 1/3
+  protocol (CALCE 5/5/6); splits are redrawn per seed, so +/- mixes split and training variability
+- Same-seed reruns move slightly (GPU nondeterminism), differences of a few tenths of a percent
+  to a few percent are normal (Section 4.9). All scripts share one set of MIT pre-trained weights
+  (unified source-model cache), so identical configurations agree across pipelines.
 
-## CX2 扩充版（results_cx2/，投稿版）
+## CX2 extension (results_cx2/, submission scope)
 
-CALCE 目标域 8→16 颗后全部实验重跑的结果，目录结构与本目录镜像：
-- transfer/ 表 3（5 种子）；t3_soh_* 表 4 首行（原始协议）
-- ablation/ 表 6（base7/curve14 配对 t）
-- conformal/ 表 5（划分 CALCE 7/2/7）+ t4c（5/5/6）+ t4d 逐电芯诊断
-  + t4_split_sweep/（校准电芯 1-5 档扫描）+ i9_seeds/（50 次划分重抽）
-  + t4zs_*（零样本路由补算，论文 3.4 对照；--zs-only 生成，20 组）
-- 复算：python code/checks/verify_results.py --results results_cx2（160 项全绿）
-本目录（results/）为 8 电芯协议的历史版本，冻结保留，仍可用
-python code/checks/verify_results.py 核对 179/179。
+All experiments rerun after the CALCE target domain grew from 8 to 16 cells; the layout mirrors
+this directory:
+- transfer/ Table 3 (5 seeds); t3_soh_* first row of Table 4 (original protocol)
+- ablation/ Table 6 (base7/curve14 paired t)
+- conformal/ Table 5 (split 7/2/7) + t4c (5/5/6) + t4d per-cell diagnostics
+  + t4_split_sweep/ (calibration cells 1-5) + i9_seeds/ (50 split redraws)
+  + t4zs_* (zero-shot route control of Section 3.4; produced with --zs-only, 20 runs)
+- Recompute: python code/checks/verify_results.py --results results_cx2 (160 checks)
+This directory (results/) is the frozen 8-cell-protocol history; it still passes
+python code/checks/verify_results.py (179/179).

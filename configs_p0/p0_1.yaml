@@ -1,8 +1,8 @@
-# P0-1 不确定性基线（MC dropout / deep ensemble / quantile regression）
-backbone: tcn            # 论文迁移骨干（单骨干口径）
+# P0-1 uncertainty baselines (MC dropout / deep ensemble / quantile regression)
+backbone: tcn            # the manuscript transfer backbone (single-backbone scope)
 target_domains: [CALCE, NASA]
 seeds: [42, 43, 44, 45, 46]
-split: {calce: [7,2,7], nasa: [2,1,1]}   # 与 t4_conformal_local.py v1.2.4 一致
+split: {calce: [7,2,7], nasa: [2,1,1]}   # as in t4_conformal_local.py v1.2.4
 window: 20
 horizon: 10
 alpha: 0.10
@@ -11,5 +11,5 @@ deep_ensemble: {members: 5, init_seeds: [1,2,3,4,5], split_seed: 42, interval: n
 quantile_regression: {taus: [0.1, 0.9], loss: pinball_mean}
 source_training: {epochs: 120, early_stopping_patience: 10, lr: 1.0e-3, batch: 256, grad_clip: 1.0}
 finetune: {epochs: 60, lr: 3.0e-4}
-data: 01_源文件/repo_论文/05_投稿/开源仓库/data/建模表_v3_cx2.csv
-src_cache: 01_源文件/repo_论文/05_投稿/开源仓库/results_cx2/src_cache   # 标准 TCN 源模型（v1.2.4）
+data: data/modeling_table_v3_cx2.csv
+src_cache: results_cx2/src_cache   # standard TCN source models (v1.2.4)

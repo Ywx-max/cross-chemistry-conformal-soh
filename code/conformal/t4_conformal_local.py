@@ -1,29 +1,29 @@
 # -*- coding: utf-8 -*-
-"""T4 保形区间双路由对照（论文表 5）。
+"""T4 dual-route conformal comparison (manuscript Table 5).
 
-同一颗微调后的模型、同一批测试窗口，只换校准分位数的来源：
-  源域校准（对照）  分位数 q_src 由源域验证残差得到
-  目标域校准（本文）分位数 q_tgt 由 1~2 颗目标电芯的循环级残差得到
+Same fine-tuned model, same test windows; only the source of the calibration quantile changes:
+  source-calibrated (control):  quantile q_src from source-domain validation residuals
+  target-calibrated (this work): quantile q_tgt from cycle-level residuals of 1-2 target cells
 
-口径：q_tgt 由微调后（部署）模型在校准电芯上的残差计算。拆分保形的有限样本
-覆盖保证要求校准分数与测试分数出自同一个预测函数，即"用哪个模型评估，就用
-哪个模型校准"；分位数若取自另一模型，覆盖评估将不再成立。
-结论：源域校准 20/20 组配置欠覆盖（PICP 0.0000~0.2518）；目标域校准把覆盖率拉回
-0.5326~1.0000，但仍普遍低于名义 0.90——1~2 颗电芯的校准集不足以支撑完整的名义覆盖。
+Convention: q_tgt comes from the residuals of the fine-tuned (deployed) model on the calibration
+cells. Split-conformal finite-sample coverage requires the calibration score and the test score
+to come from one prediction function (calibrate with the model you evaluate); a quantile taken from another model invalidates the coverage evaluation.
+Result: source-calibrated intervals under-cover in all 20 configurations (PICP 0.0000-0.2518);
+target recalibration lifts coverage to 0.5326-1.0000 but stays mostly below nominal 0.90: a calibration set of 1-2 cells cannot support nominal coverage.
 
-口径提醒（论文 3.4 末有声明）：这里报告的是边际经验覆盖率。循环级残差存在
-自相关，严格可交换性不满足，所以是经验证据而非有限样本保证。
-逐电芯诊断与按电芯聚合变体见 t4d_per_cell_diag.py。
+Scope note (stated at the end of Section 3.4): what is reported here is marginal empirical coverage.
+Cycle-level residuals are autocorrelated, strict exchangeability does not hold, so this is empirical evidence rather than a finite-sample guarantee.
+Per-cell diagnostics and aggregation variants live in t4d_per_cell_diag.py.
 
-划分协议：CALCE (7 微调, 2 校准, 7 测试)、NASA (2, 1, 1)，划分随种子重新抽取。
-运行：python t4_conformal_local.py --model tcn --seed 42（论文口径：42~46 各一次）
-可选：--src-cache <dir> 指向含 t4d_src_<model>_s<seed>.pt 的目录，跳过源域预训练
-      （缓存模型与 t4d 诊断共用，协议同本脚本；不提供则现场训练）。
-可选：--zs-only 零样本路由实测（论文 3.4 的对照补算）：跳过微调，直接将源模型
-      以目标域测试窗口评估源域校准区间的覆盖率（同一 q_src、同一划分与标准化，
-      只把评估对象换为零样本模型残差），另存 t4zs_<model>_s<seed>.json；
-      缺省行为与既有结果完全不变。
-输出：results/conformal/t4_<model>_s<seed>.json（含逐电芯残差向量）"""
+Splits: CALCE (7 fine-tune, 2 calibration, 7 test), NASA (2, 1, 1); splits are redrawn per seed.
+Run: python t4_conformal_local.py --model tcn --seed 42 (manuscript scope: one run per seed, 42-46)
+Optional: --src-cache <dir> pointing at a directory with t4d_src_<model>_s<seed>.pt to skip source pre-training
+      (the cache is shared with the t4d diagnostics and follows this script's protocol; otherwise the source model is trained on the spot).
+Optional: --zs-only zero-shot route run (the Section 3.4 control): skips fine-tuning and evaluates the
+      source-calibrated intervals on the target test windows with the source model itself (same q_src,
+      same split and standardization; only the evaluation residuals switch to the zero-shot model),
+      written to t4zs_<model>_s<seed>.json; the default behaviour and existing results are unchanged.
+Output: results/conformal/t4_<model>_s<seed>.json (with per-cell residual vectors)"""
 import argparse, json, os, random, time
 import numpy as np
 import pandas as pd
@@ -31,16 +31,16 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
-# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+# soh must be dropped: it is the label of the SOH task, and a label in the inputs hands the answer to the model
+# (before the 2026-10-03 fix an identity-copy baseline scored RMSE=0, the leak in plain sight).
 FEATS = ["capacity_Ah", "discharge_dur_s", "v_mean_V", "v_min_V",
          "ica_peak", "ica_peak_V"]
 WINDOW = 20
-# 超前步长：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前 SOH 预测）。
-# 寿命末端不足 H 步、或窗口到标签之间循环号不连续的窗口丢弃。
+# horizon: label = soh at H cycles after the last row of the window (H-step-ahead prediction).
+# Windows closer than H steps to the record end, or with cycle gaps between window and label, are dropped.
 H = 10
-# 建模表路径（数据放 data/ 下即可，合并方法见 code/README.md）
-DATA = "data/建模表_v3.csv"
+# modeling-table path (data goes under data/; merge procedure in code/README.md)
+DATA = "data/modeling_table_v3.csv"
 ALPHA = 0.10
 
 def set_seed(seed):
@@ -151,12 +151,12 @@ def concat_cells(cells, bids):
     return X, y, [b for b in bids for _ in range(len(cells[b][0]))]
 
 def conformal_q(residuals, alpha=ALPHA):
-    """split conformal 的经验分位数：取第 ceil((n+1)(1-alpha)) 个次序统计量。
+    """Empirical split-conformal quantile: the ceil((n+1)(1-alpha))-th order statistic.
 
-    min(n-1, ...) 是工程兜底：n 很小（比如 NASA 校准集只有 1 颗电芯、电芯级
-    得分的 n 只有 1~2）时，(n+1)(1-alpha) 会越过 n，此时索引被压到最大值，
-    等价于取最差的校准样本。要清醒：这种情况下保形的有限样本保证本来就是
-    空的，n 太小时区间只有经验意义。"""
+    The min(n-1, ...) clamp is an engineering fallback: when n is tiny (a NASA calibration set of one
+    cell gives only 1-2 cell-level scores), (n+1)(1-alpha) exceeds n and the index is clamped to the
+    maximum, i.e. the worst calibration sample. Be aware that in that regime the finite-sample
+    guarantee of conformal prediction is empty anyway and the interval is empirical only."""
     n = len(residuals)
     idx = min(n - 1, int(np.ceil((n + 1) * (1 - alpha))) - 1)
     return float(np.sort(residuals)[idx])
@@ -167,23 +167,23 @@ def main():
     ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--ft-epochs", type=int, default=60)
     ap.add_argument("--horizon", type=int, default=H,
-                    help="超前步长：标签 = 窗口末行后第 H 个循环的 soh")
+                    help="horizon: label = soh at H cycles after the last window row")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default="results/conformal")
-    ap.add_argument("--data", default=DATA, help="建模表 csv 路径")
+    ap.add_argument("--data", default=DATA, help="modeling-table csv path")
     ap.add_argument("--src-cache", default=None,
-                    help="统一源模型缓存目录；命中则跳过源域预训练")
+                    help="unified source-model cache directory; a hit skips source pre-training")
     ap.add_argument("--split-calce", default="7,2,7",
-                    help="CALCE 微调/校准/测试电芯数（论文协议 7/2/7）")
+                    help="CALCE fine-tune/calibration/test cell counts (manuscript protocol 7/2/7)")
     ap.add_argument("--split-nasa", default="2,1,1",
-                    help="NASA 微调/校准/测试电芯数")
+                    help="NASA fine-tune/calibration/test cell counts")
     ap.add_argument("--n-cal", type=int, default=None,
-                    help="扫描校准电芯数（4.5 节覆盖-校准量关系）：给定后 CALCE 用 "
-                         "(16-7-N, N, 7) 划分（测试电芯固定 7，微调随校准数相应减少），NASA 不参与扫描，结果另存 "
-                         "t4_<model>_s<seed>_cal<N>.json；缺省保持论文表 5 的划分不变")
+                    help="sweep the calibration-cell count (Section 4.5 coverage-vs-calibration study): when given, CALCE uses the "
+                         "(16-7-N, N, 7) split (7 test cells fixed, fine-tuning cells shrink with the calibration count); NASA is not swept; results go to "
+                         "t4_<model>_s<seed>_cal<N>.json; the default keeps the Table 5 splits unchanged")
     ap.add_argument("--zs-only", action="store_true",
-                    help="零样本路由实测（论文 3.4 对照补算）：跳过微调，用源模型在目标域测试窗口"
-                         "评估源域校准区间覆盖率，另存 t4zs_<model>_s<seed>.json")
+                    help="zero-shot route run (the Section 3.4 control): skip fine-tuning and evaluate source-calibrated interval coverage "
+                         "with the source model on the target test windows; written to t4zs_<model>_s<seed>.json")
     args = ap.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"T4 conformal device={device} model={args.model} alpha={ALPHA}", flush=True)
@@ -196,7 +196,7 @@ def main():
     Xva, yva, _ = concat_cells(src, src_bids[-n_va:])
     sc_src = StandardScaler().fit(Xtr.reshape(-1, Xtr.shape[2]))
     Xtr, Xva = std_with(sc_src, Xtr), std_with(sc_src, Xva)
-    set_seed(args.seed)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    set_seed(args.seed)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model = new_model(args.model, Xtr.shape[2]).to(device)
     cache_p = None
     if args.src_cache:
@@ -209,22 +209,22 @@ def main():
             model.load_state_dict(torch.load(cache_p, map_location=device, weights_only=True))
             print(f"[cache] load source model {cache_p}", flush=True)
         else:
-            print(f"[cache] {args.src_cache} 无命中，改为现场训练", flush=True)
+            print(f"[cache] {args.src_cache} has no hit; training on the spot", flush=True)
     if cache_p is None:
         t0 = time.time()
         model = fit_model(model, Xtr, ytr, args.epochs, args.seed, device, Xva, yva)
-        print(f"源域训练完成 {time.time()-t0:.0f}s", flush=True)
+        print(f"source-domain training done in {time.time()-t0:.0f}s", flush=True)
         if args.src_cache:
             _save = os.path.join(args.src_cache,
                                  f"src_{args.model}_s{args.seed}_ep{args.epochs}_h{args.horizon}.pt")
             torch.save(model.state_dict(), _save)
-            print(f"[cache] 源模型已写入 {_save}", flush=True)
-    # 源域校准残差 (朴素路由用)
-    # 朴素路由的分位数：源域验证集上的绝对残差。源域内模型拟合近乎完美，
-    # q_src 非常小，这正是它到了目标域全面失守的伏笔
+            print(f"[cache] source model written to {_save}", flush=True)
+    # source-domain calibration residuals (used by the naive route)
+    # quantile of the naive route: absolute residuals on the source validation set. In-domain fits are
+    # near perfect, so q_src is very small, which foreshadows its wholesale failure in the target domain
     src_cal_res = np.abs(predict(model, Xva, device) - yva)
     q_src = conformal_q(src_cal_res)
-    print(f"源域校准分位数 q_src={q_src:.4f}", flush=True)
+    print(f"source-domain calibration quantile q_src={q_src:.4f}", flush=True)
 
     results = {"model": args.model, "alpha": ALPHA, "q_src": q_src,
                "horizon": args.horizon, "targets": {}}
@@ -232,25 +232,25 @@ def main():
                "NASA": tuple(int(x) for x in args.split_nasa.split(","))}
     for tgt_name, split in [("CALCE", _splits["CALCE"]), ("NASA", _splits["NASA"])]:
         if args.n_cal is not None and tgt_name == "CALCE":
-            # 覆盖-校准量扫描：测试电芯固定 7，微调 = 16-7-cal，
-            # 校准 1..5 档共享同一批测试电芯，覆盖曲线可比
+            # coverage-vs-calibration sweep: 7 test cells fixed, fine-tuning = 16-7-cal,
+            # calibration levels 1..5 share one test-cell set so the coverage curve is comparable
             split = (16 - 7 - args.n_cal, args.n_cal, 7)
             if split[0] < 1 or split[1] < 1 or split[2] < 1:
-                print(f"[{tgt_name}] n_cal={args.n_cal} 划分非法, 跳过", flush=True)
+                print(f"[{tgt_name}] n_cal={args.n_cal} invalid split, skipped", flush=True)
                 continue
         tgt = build_windows_ds(df, tgt_name, horizon=args.horizon)
         tb = sorted(tgt)
         n_ft, n_cal, n_te = split
         if len(tb) < n_ft + n_cal + n_te:
-            print(f"[{tgt_name}] 电芯不足, 跳过", flush=True)
+            print(f"[{tgt_name}] too few cells, skipped", flush=True)
             continue
         random.Random(args.seed).shuffle(tb)
         ft_b, cal_b, te_b = tb[:n_ft], tb[n_ft:n_ft+n_cal], tb[n_ft+n_cal:]
         Xall_t, _, _ = concat_cells(tgt, tb)
         sc_tgt = StandardScaler().fit(Xall_t.reshape(-1, Xall_t.shape[2]))
         if args.zs_only:
-            # 零样本路由实测：预测函数与校准分数都出自源模型（同一 q_src），
-            # 只有评估数据在目标域——把评估对象从微调残差换为零样本残差。
+            # zero-shot route run: prediction function and calibration scores both come from the source
+            # model (one q_src); only the evaluation data sits in the target domain, switching residuals from fine-tuned to zero-shot.
             Xte, yte, _ = concat_cells(tgt, te_b)
             Xte_s = std_with(sc_tgt, Xte)
             pred_zs = predict(model, Xte_s, device)
@@ -271,7 +271,7 @@ def main():
                               "PICP_src_zeroshot": cov_zs},
                 "per_cell": per_cell_zs}
             print(f"[{tgt_name}][zs] RMSE_zs={rmse_zs:.4f} med|r|={med_zs:.4f} "
-                  f"源校准覆盖(zs)={cov_zs:.4f} (名义覆盖 {1-ALPHA:.2f})", flush=True)
+                  f"source-calibrated coverage (zs)={cov_zs:.4f} (nominal {1-ALPHA:.2f})", flush=True)
             continue
         Xft, yft, _ = concat_cells(tgt, ft_b)
         ft_model = new_model(args.model, Xtr.shape[2]).to(device)
@@ -280,21 +280,21 @@ def main():
                              args.ft_epochs, args.seed, device, lr=3e-4)
         Xcal, ycal, _ = concat_cells(tgt, cal_b)
         Xcal = std_with(sc_tgt, Xcal)
-        # 目标域校准残差：用微调后的部署模型在校准电芯上取残差（校准与评估同源）。
-        # 校准集 ft_b 与 cal_b 互斥，微调模型没见过校准电芯，不存在"过于熟悉"的问题
+        # target-domain calibration residuals: from the fine-tuned deployed model on the calibration cells (calibration and evaluation share the model).
+        # calibration cells cal_b and fine-tuning cells ft_b are disjoint, so the fine-tuned model has never seen the calibration cells
         cal_res = np.abs(predict(ft_model, Xcal, device) - ycal)
         q_tgt = conformal_q(cal_res)
         Xte, yte, _ = concat_cells(tgt, te_b)
         Xte_s = std_with(sc_tgt, Xte)
         pred = predict(ft_model, Xte_s, device)
         res_te = np.abs(pred - yte)
-        # 目标域校准路由 (本方法)
-        # 覆盖率按"汇集的所有测试窗口"计（边际口径）；MPIW = 区间平均全宽 = 2q
+        # target-domain calibration route (the proposed method)
+        # coverage over all pooled test windows (marginal scope); MPIW = mean full interval width = 2q
         cov_tgt = float(np.mean(res_te <= q_tgt)); w_tgt = 2 * q_tgt
-        # 源域校准路由 (朴素对照)
+        # source-domain calibration route (naive control)
         cov_src = float(np.mean(res_te <= q_src)); w_src = 2 * q_src
-        # 逐电芯残差与覆盖率：校准电芯存部署模型残差向量，测试电芯另存逐窗口
-        # 覆盖判定与 RMSE，后续换诊断指标不用重训
+        # per-cell residuals and coverage: calibration cells store deployed-model residual vectors, test cells store per-window
+        # coverage flags and RMSE, so later diagnostics need no retraining
         idx0 = 0
         per_cell = {}
         for b in te_b:
@@ -319,9 +319,9 @@ def main():
             "source_calibrated": {"PICP": cov_src, "MPIW": w_src},
             "per_cell": per_cell,
             "cal_cells_residuals": cal_cells_res}
-        print(f"[{tgt_name}] 点预测RMSE={results['targets'][tgt_name]['point_rmse']:.4f} | "
-              f"目标校准: PICP={cov_tgt:.2f} MPIW={w_tgt:.4f} | "
-              f"源校准: PICP={cov_src:.2f} MPIW={w_src:.4f} (名义覆盖 {1-ALPHA:.2f})", flush=True)
+        print(f"[{tgt_name}] point RMSE={results['targets'][tgt_name]['point_rmse']:.4f} | "
+              f"target-cal: PICP={cov_tgt:.2f} MPIW={w_tgt:.4f} | "
+              f"source-cal: PICP={cov_src:.2f} MPIW={w_src:.4f} (nominal {1-ALPHA:.2f})", flush=True)
     os.makedirs(args.out, exist_ok=True)
     suffix = "_cal%d" % args.n_cal if args.n_cal is not None else ""
     tag = "t4zs" if args.zs_only else "t4"

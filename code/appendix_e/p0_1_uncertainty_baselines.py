@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-"""P0-1: 不确定性基线对比（MC dropout / deep ensemble / quantile regression vs 目标域 conformal）。
+"""P0-1: uncertainty-baseline comparison (MC dropout / deep ensemble / quantile regression vs target-domain conformal).
 
-口径：TCN 单骨干（论文迁移骨干）、CALCE/NASA 两目标域、seeds 42-46（划分与微调协议与
-t4_conformal_local.py v1.2.4 逐字一致，源模型用 results_cx2/src_cache；MC/QR 需新源模型，
-训练协议同 Section 3.2，缓存到 05_补充实验/results/p0_1_src_cache/）。
-方法与区间构造：
-  MC dropout      TCN 每块后 Dropout(0.1)，训练同标准协议；推断以 train 模式采样 T=30，
-                  区间 = mean ± z_{1-alpha/2}·std（正态近似，alpha=0.10）
-  Deep ensemble   seed42 划分、5 个初始化（init_seed 1-5）从同一源模型微调，
-                  区间 = 成员均值 ± z_{1-alpha/2}·成员间 std（单划分口径，成本所限）
-  Quantile reg.   TCN 双头（tau=0.1/0.9），loss=平均 pinball；区间 = [q_lo, q_hi] 直接输出
-  Conformal       P0-2 重算批 alpha=0.10 target 路由（同划分同种子，直接引用）
-指标：PICP / MPIW / NMPIW / Winkler / pinball(alpha/2, 1-alpha/2) / point RMSE（统一 metric_interval）。
-输出：results/p0_1_uncertainty.csv；logs/p0_1.log
-运行：python p0_1_uncertainty_baselines.py（cwd = 开源仓库根目录）
+Scope: TCN backbone only (the transfer backbone of the paper), both target domains CALCE/NASA, seeds 42-46 (splits and
+fine-tuning protocol identical to t4_conformal_local.py v1.2.4; source models from results_cx2/src_cache; MC/QR need
+new source models under the Section 3.2 training protocol, cached under p0_1_src_cache/).
+Methods and interval construction:
+  MC dropout      Dropout(0.1) after each TCN block, standard training protocol; inference samples T=30 in train mode,
+                  interval = mean +/- z_{1-alpha/2}*std (Gaussian approximation, alpha=0.10)
+  Deep ensemble   seed-42 split, 5 initialisations (init_seed 1-5) fine-tuned from one source model,
+                  interval = member mean +/- z_{1-alpha/2}*member std (single-split scope, for cost reasons)
+  Quantile reg.   two-head TCN (tau=0.1/0.9), mean-pinball loss; interval = [q_lo, q_hi] directly
+  Conformal       the alpha=0.10 target route of the P0-2 recomputation batch (same splits and seeds, referenced directly)
+Metrics: PICP / MPIW / NMPIW / Winkler / pinball(alpha/2, 1-alpha/2) / point RMSE (one shared metric_interval).
+Output: results/p0_1_uncertainty.csv; logs/p0_1.log
+Run: python p0_1_uncertainty_baselines.py (cwd = repository root)
 """
 import csv, io, os, sys, time
 
@@ -41,7 +41,7 @@ def log(m):
 
 
 class TCN_MC(nn.Module):
-    """TCN + 每块后 Dropout(0.1)（MC dropout 基线）。"""
+    """TCN with Dropout(0.1) after each block (MC dropout baseline)."""
     def __init__(self, input_dim, d=64, layers=4, p=0.1):
         super().__init__()
         ch = [input_dim] + [d] * layers
@@ -56,7 +56,7 @@ class TCN_MC(nn.Module):
 
 
 class TCN_QR(nn.Module):
-    """TCN 双头分位数回归（tau=0.1 / 0.9）。"""
+    """Two-head TCN quantile regression (tau=0.1 / 0.9)."""
     def __init__(self, input_dim, d=64, layers=4):
         super().__init__()
         ch = [input_dim] + [d] * layers
@@ -70,7 +70,7 @@ class TCN_QR(nn.Module):
 
 
 def fit_generic(model, Xtr, ytr, epochs, seed, device, Xva, yva, lr, lossf, out_dim=1):
-    """fit_model 的参数化损失版（协议逐字一致：Adam、batch 256、裁剪 1.0、早停耐心 10）。"""
+    """Parameterised-loss version of fit_model (protocol identical: Adam, batch 256, clip 1.0, patience 10)."""
     set_seed(seed)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     ds = torch.utils.data.TensorDataset(torch.tensor(Xtr, dtype=torch.float32),
@@ -116,7 +116,7 @@ def metric_interval(y, lo, hi, alpha):
 
 
 def predict_mc(model, X, device, T=30):
-    """MC dropout：train 模式（dropout active）采样 T 次。"""
+    """MC dropout: sample T times in train mode (dropout active)."""
     model.train()
     xt = torch.tensor(X, dtype=torch.float32).to(device)
     outs = []
@@ -127,7 +127,7 @@ def predict_mc(model, X, device, T=30):
 
 
 def get_split_data(df, model_name, seed, device):
-    """复现 t4 管线：源 cache 加载、划分、微调（标准 MSE）；返回微调模型与窗口数据。"""
+    """Reproduce the t4 pipeline: source cache load, split, fine-tuning (standard MSE); returns the fine-tuned model and window data."""
     src = build_windows_ds(df, "MIT", horizon=10)
     src_bids = sorted(src)
     import random
@@ -162,13 +162,13 @@ def get_split_data(df, model_name, seed, device):
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    z = float(norm.ppf(0.95))   # alpha=0.10 双侧
+    z = float(norm.ppf(0.95))   # alpha=0.10, two-sided
     log(f"P0-1 device={device} z95={z:.4f}")
     df = pd.read_csv(DATA)
     rows = []
     t_all = time.time()
 
-    # ---------- MC dropout ----------
+    # MC dropout
     log("== MC dropout ==")
     for seed in (42, 43, 44, 45, 46):
         t0 = time.time()
@@ -218,7 +218,7 @@ def main():
                              point_rmse=round(float(np.sqrt(np.mean((mu - yte) ** 2))), 5)))
         log(f"[MC s{seed}] {time.time()-t0:.0f}s")
 
-    # ---------- Deep ensemble（seed 42 划分，5 成员） ----------
+    # Deep ensemble (seed-42 split, 5 members)
     log("== Deep ensemble (seed 42 split, 5 members) ==")
     t0 = time.time()
     seed = 42
@@ -241,7 +241,7 @@ def main():
         _cp = os.path.join(SRC_CACHE, f"src_tcn_s{seed}_ep120_h10.pt")
         if os.path.exists(_cp):
             _base_state = torch.load(_cp, map_location=device, weights_only=True)
-        else:  # 源缓存未随仓库分发：现场按 Section 3.2 协议重建（验证=训练，与 t4 缺省一致）
+        else:  # source caches are not distributed: rebuild on the spot under the Section 3.2 protocol (validation=train, as in the t4 default)
             _bm = new_model("tcn", Xtr.shape[2]).to(device)
             _bm = fit_generic(_bm, std_with(sc_src, Xtr), ytr, 120, seed, device,
                               std_with(sc_src, Xtr), ytr, 1e-3,
@@ -267,7 +267,7 @@ def main():
                          point_rmse=round(float(np.sqrt(np.mean((mu - yte) ** 2))), 5)))
     log(f"[ensemble] {time.time()-t0:.0f}s")
 
-    # ---------- Quantile regression ----------
+    # Quantile regression
     log("== Quantile regression (tau=0.1/0.9) ==")
     def qr_loss(out, y):
         ql, qh = out[:, 0], out[:, 1]
@@ -319,7 +319,7 @@ def main():
                              point_rmse=round(float(np.sqrt(np.mean((mid - yte) ** 2))), 5)))
         log(f"[QR s{seed}] {time.time()-t0:.0f}s")
 
-    # ---------- Conformal 对照（P0-2 重算批 alpha=0.10 target） ----------
+    # Conformal control (P0-2 recomputation batch, alpha=0.10 target route)
     cref = os.path.join(OUT_RES, "p0_2_metrics.csv")
     if os.path.exists(cref):
         for r in csv.DictReader(open(cref, encoding="utf-8")):
@@ -332,10 +332,10 @@ def main():
     with open(os.path.join(OUT_RES, "p0_1_uncertainty.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader(); w.writerows(rows)
-    log(f"P0-1 完成 {time.time()-t_all:.0f}s，共 {len(rows)} 行 -> p0_1_uncertainty.csv")
-    # 汇总
+    log(f"P0-1 done in {time.time()-t_all:.0f}s, {len(rows)} rows -> p0_1_uncertainty.csv")
+    # summary
     import statistics as st
-    log("\n=== 5 种子汇总（mean±std PICP / MPIW / Winkler） ===")
+    log("\n=== 5-seed summary (mean+/-std PICP / MPIW / Winkler) ===")
     methods = sorted(set(r["method"] for r in rows))
     for mth in methods:
         for dom in ("CALCE", "NASA"):

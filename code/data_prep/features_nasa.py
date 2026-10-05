@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""NASA 每循环健康特征工程（T1 第二步）：扫描 .mat，一个放电循环产出一行。
+"""NASA per-cycle health features (step 2 of T1): scan the .mat files, one row per discharge cycle.
 
-特征 = 容量/SOH/放电时长/最低电压 + "前驱充电循环"的 ICA 三件套
-（峰值、峰位、充电时长）。取前驱充电而非同循环，是因为充电发生在
-放电之前，预测当前循环时它已经是发生过的事，不构成未来信息泄漏。
+Features = capacity/SOH/discharge duration/minimum voltage + the ICA triplet of the "preceding charge cycle"
+(peak, peak position, charge duration). The preceding charge rather than the same cycle, because charging
+happens before discharge, so predicting the current cycle it is already in the past and leaks no future information.
 
-ICA 口径与 CALCE 略有差异：这里用 5mV 网格（CALCE 10mV）+ 0.9 倍 CC 基准
-（CALCE 0.7）。NASA 采样更稀，网格粗了峰值会糊；CC 基准取前 20 点中位数，
-但充电起始若含静置尾巴，基准会偏低、CC 段偏保守（已知问题，
-详见 数据/解析说明_NASA特征.md 的待办）。
+The ICA convention differs slightly from CALCE: a 5 mV grid here (CALCE 10 mV) and a 0.9x CC basis
+(CALCE 0.7). NASA samples sparsely, so a coarser grid blurs the peak; the CC basis is the median of the first
+20 points, but if the charge starts with a rest tail the basis runs low and the CC segment turns conservative
+(a known issue; the pending item is noted in the NASA feature parsing notes).
 
-输入：data/raw/nasa/*.mat；输出：data/nasa_features.csv"""
+Input: data/raw/nasa/*.mat; output: data/nasa_features.csv"""
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -28,9 +28,9 @@ def pick(obj, *names):
     return None
 
 def ica_features(v, i, t):
-    """CC 过滤后的充电段 → (ICA 主峰高度, 峰位置)。
-    电压-容量对先按电压排序再插值到 5mV 网格：原始序列电压基本单调
-    但偶有回跳，不排序的话 np.interp 会出垃圾。"""
+    """CC-filtered charging segment -> (ICA main-peak height, peak position).
+    Voltage-capacity pairs are sorted by voltage before interpolating onto the 5 mV grid: the raw sequence is
+    mostly monotonic but has occasional jumps, and np.interp produces junk on an unsorted series."""
     dt = np.diff(t)
     q = np.concatenate([[0], np.cumsum(np.abs(i[1:]) * dt)]) / 3600.0
     vm = (v[:-1] + v[1:]) / 2.0
@@ -62,7 +62,7 @@ def main():
                 if v is None or i is None or t is None:
                     last_charge = {"ica_peak": np.nan, "ica_peak_V": np.nan, "charge_dur_s": np.nan}
                 else:
-                    i_nom = np.median(np.abs(i[:20]))  # CC 基准：前 20 点中位数（含静置时偏低，见 docstring）
+                    i_nom = np.median(np.abs(i[:20]))  # CC basis: median of the first 20 points (low with a rest tail; see docstring)
                     cc = np.abs(i) >= 0.9 * i_nom
                     if cc.sum() >= 50:
                         pk, pv = ica_features(v[cc], i[cc], t[cc])
@@ -70,7 +70,7 @@ def main():
                         pk, pv = np.nan, np.nan
                     last_charge = {"ica_peak": pk, "ica_peak_V": pv, "charge_dur_s": float(t[-1])}
             elif ctype == "discharge":
-                # 循环号按"放电次数"重新编（.mat 原始 index 混着内阻测量等非放电循环）
+                # cycle numbers re-indexed by discharge count (raw .mat indices mix in resistance-measurement cycles)
                 n_dis += 1
                 cap = float(pick(d, "Capacity")[0])
                 t_arr = pick(d, "time", "Time")
@@ -86,7 +86,7 @@ def main():
     df.to_csv(out, index=False, encoding="utf-8-sig")
     print(df.groupby("battery_id").agg(n=("cycle","max"), ica_first=("ica_peak","first"),
           ica_last=("ica_peak","last"), miss=("ica_peak", lambda s: s.isna().sum())).round(3).to_string())
-    print("已输出:", out)
+    print("written:", out)
 
 if __name__ == "__main__":
     main()

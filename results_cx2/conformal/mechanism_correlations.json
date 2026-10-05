@@ -1,6 +1,6 @@
 {
  "n_points": 20,
- "note": "20 配置点 = 2 骨干 × 5 种子 × 2 目标域；数据源 results_cx2/conformal/t4_*.json",
+ "note": "20 configuration points = 2 backbones x 5 seeds x 2 target domains; data: results_cx2/conformal/t4_*.json",
  "pointwise": [
   {
    "model": "tcn",

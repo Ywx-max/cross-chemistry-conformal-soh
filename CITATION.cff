@@ -8,16 +8,16 @@ authors:
     email: 2024212097@bupt.cn
     orcid: "https://orcid.org/0009-0006-1813-333X"
     affiliation: "School of Automation, Beijing University of Posts and Telecommunications, Beijing 100876, China"
-version: "v1.0.0"
+version: "v1.0.1"
 date-released: "2026-10-05"
 repository-code: "https://github.com/Ywx-max/cross-chemistry-conformal-soh"
-license: MIT
+license: [MIT, CC-BY-4.0]
 abstract: >-
   Code and derived results for the manuscript "Conformal coverage failure and target-domain
   recalibration in cross-chemistry state-of-health prediction of lithium-ion batteries"
-  (submitted to the Journal of Energy Storage). Dual licensing: the code is licensed under MIT
+  (to be submitted to the Journal of Energy Storage). Dual licensing: the code is licensed under MIT
   (LICENSE); the derived results, figures and modeling tables are licensed under CC-BY-4.0
-  (DATA_LICENSE.md). Third-party datasets are not redistributed. Zenodo DOI: 10.5281/zenodo.23159359.
+  (DATA_LICENSE.md). Third-party datasets are not redistributed. Zenodo concept DOI: 10.5281/zenodo.23159358.
 keywords:
   - lithium-ion battery
   - state of health

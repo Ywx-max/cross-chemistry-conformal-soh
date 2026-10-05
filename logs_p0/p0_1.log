@@ -13,9 +13,9 @@ P0-1 device=cuda z95=1.6449
 [QR s44] 122s
 [QR s45] 137s
 [QR s46] 53s
-P0-1 完成 667s，共 42 行 -> p0_1_uncertainty.csv
+P0-1 done in 667s, 42 rows -> p0_1_uncertainty.csv
 
-=== 5 种子汇总（mean±std PICP / MPIW / Winkler） ===
+=== 5-seed summary (mean+/-std PICP / MPIW / Winkler) ===
   Deep ensemble (5, seed42 split)    CALCE  PICP 0.402±nan  MPIW 0.067±nan  Winkler 0.5769
   Deep ensemble (5, seed42 split)    NASA   PICP 0.007±nan  MPIW 0.011±nan  Winkler 0.4253
   MC dropout                         CALCE  PICP 0.397±0.076  MPIW 0.059±0.002  Winkler 0.7594

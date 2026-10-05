@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""NASA PCoE 解析（T1）：4 颗 18650 钴酸锂（B0005/6/7/0018）→ 容量退化序列。
+"""NASA PCoE parsing (T1): 4 LCO 18650 cells (B0005/6/7/0018) -> capacity fade series.
 
-NASA 的 .mat 结构出了名的各版本不统一：字段一会儿 time 一会儿 Time。
-pick() 按候选名顺序取第一个存在的字段，省得为大小写写一堆 if。
-EOL 定为容量衰减到额定 2.0Ah 的 70%（1.4Ah）。注意与 CALCE/MIT 的 80%
-口径不同，这是数据集自身的退役标准，论文 3.1 有说明。
+NASA .mat structures are famously inconsistent across versions: a field is time in one and Time in another.
+pick() takes the first existing candidate name in order, saving a pile of case branches.
+EOL is set at 70% of the rated 2.0 Ah (1.4 Ah). Note this differs from the 80% of CALCE/MIT,
+a retirement criterion from the dataset itself; Section 3.1 documents it.
 
-本脚本只产容量级序列（nasa_capacity.csv + 退化曲线图）；
-循环级特征（含 ICA）在 features_nasa.py，两步分开是因为 ICA 解析慢得多，
-调特征参数时不想每次都重扫 .mat。
+This script yields capacity-level series only (nasa_capacity.csv + a fade plot);
+cycle-level features (with ICA) live in features_nasa.py, split in two steps because ICA parsing is much slower
+and tuning feature parameters should not rescan the .mat files every time.
 
-输入：data/raw/nasa/*.mat；输出：data/nasa_capacity.csv、results/nasa_degradation.png"""
+Input: data/raw/nasa/*.mat; output: data/nasa_capacity.csv, results/nasa_degradation.png"""
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
@@ -29,7 +29,7 @@ plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
 plt.rcParams["axes.unicode_minus"] = False
 
 def pick(obj, *names):
-    """按候选字段名取第一个存在的（.mat 字段大小写在不同批次里不一致）。"""
+    """First existing candidate field name (.mat field casing differs across batches)."""
     for n in names:
         if hasattr(obj, n):
             return np.atleast_1d(np.asarray(getattr(obj, n))).astype(float)
@@ -37,7 +37,7 @@ def pick(obj, *names):
 
 def parse_battery(mat_path):
     mat = sio.loadmat(str(mat_path), struct_as_record=False, squeeze_me=True)
-    key = next(k for k in mat if not k.startswith("__"))  # 排除 __header__ 等元数据键
+    key = next(k for k in mat if not k.startswith("__"))  # skip metadata keys like __header__
     cycles = np.atleast_1d(mat[key].cycle)
     rows = []
     for i, c in enumerate(cycles):
@@ -59,10 +59,10 @@ def parse_battery(mat_path):
 def main():
     mats = sorted(RAW_DIR.glob("B00*.mat"))
     if not mats:
-        raise SystemExit(f"未找到 .mat 文件: {RAW_DIR}")
+        raise SystemExit(f"no .mat files found: {RAW_DIR}")
     df = pd.concat([parse_battery(m) for m in mats], ignore_index=True)
-    # EOL = 首次跌破 1.4Ah 的循环；RUL = EOL 循环 - 当前循环（未达 EOL 的电芯为 NaN，
-    # 后续 RUL 口径实验会自动跳过这些电芯）
+    # EOL = first cycle below 1.4 Ah; RUL = EOL cycle - current cycle (NaN until EOL is reached,
+    # and the later RUL-scope experiments skip such cells automatically)
     eol_map = df[df["capacity_Ah"] < EOL_AH].groupby("battery_id")["cycle"].min()
     df["eol_cycle"] = df["battery_id"].map(eol_map).fillna(-1).astype(int)
     df["rul"] = np.where(df["eol_cycle"] > 0, df["eol_cycle"] - df["cycle"], np.nan)
@@ -75,12 +75,12 @@ def main():
     for bid, g in df.groupby("battery_id"):
         ax.plot(g["cycle"], g["capacity_Ah"], marker=".", ms=3, lw=1, label=bid)
     ax.axhline(EOL_AH, color="r", ls="--", lw=1, label="EOL 1.4 Ah")
-    ax.set_xlabel("循环次数"); ax.set_ylabel("放电容量 (Ah)")
-    ax.set_title("NASA PCoE 电池容量退化曲线")
+    ax.set_xlabel("Cycle index"); ax.set_ylabel("Discharge capacity (Ah)")
+    ax.set_title("NASA PCoE capacity degradation")
     ax.legend(); ax.grid(alpha=0.3); fig.tight_layout()
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     fig.savefig(FIG_DIR / "nasa_degradation.png")
-    print("已输出:", out_csv)
+    print("written:", out_csv)
 
 if __name__ == "__main__":
     main()

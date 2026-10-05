@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""P0-3: 统计升级——Wilcoxon signed-rank + Holm 校正 + 效应量（配对 Cohen's dz）。
+"""P0-3: statistics upgrade - Wilcoxon signed-rank + Holm correction + effect size (paired Cohen's dz).
 
-数据源（版本隔离）：results_cx2/transfer/persistence_baseline.json 的 paired 段
-（微调/零样本模型 vs persistence 的逐种子池化 RMSE，seeds 42-46）。
-对比族（论文 4.3 的 6 组配对 + 零样本 8 组，全算，正文重点 6 组 ft）：
-  ft  = 微调模型 vs persistence；zero = 零样本 vs persistence。
-检验：双侧 Wilcoxon signed-rank（scipy，exact 模式；n=5 时最小可能 p=0.0625，
-故 n=5 下 Wilcoxon 原则上达不到 0.05——这是小样本统计升级的如实结论，
-显著性表述需配合效应量 dz）。Holm-Bonferroni 在 ft 族（n=6）与 zero 族（n=8）内分别校正。
-输出：results/p0_3_statistics.csv + 控制台摘要。
+Data (version isolation): the paired section of results_cx2/transfer/persistence_baseline.json
+(per-seed pooled RMSE of the fine-tuned/zero-shot models vs persistence, seeds 42-46).
+Comparison family (the 6 paired configurations of Section 4.3 plus the 8 zero-shot ones; the text focuses on the 6 ft):
+  ft = fine-tuned model vs persistence; zero = zero-shot vs persistence.
+Test: two-sided Wilcoxon signed-rank (scipy, exact mode; with n=5 the smallest possible p is 0.0625,
+so at n=5 Wilcoxon cannot reach 0.05 in principle - the honest conclusion of this small-sample upgrade;
+significance must be stated with the effect size dz). Holm-Bonferroni within the ft (n=6) and zero (n=8) families separately.
+Output: results/p0_3_statistics.csv + console summary.
 """
 import csv, io, json, os, sys
 
@@ -32,7 +32,7 @@ def cohens_dz(diff):
 
 
 def holm(pvals):
-    """Holm-Bonferroni：返回 (adjust_p, reject@0.05)。"""
+    """Holm-Bonferroni: returns (adjusted_p, reject@0.05)."""
     m = len(pvals)
     order = np.argsort(pvals)
     adj = np.empty(m)
@@ -48,12 +48,12 @@ rows = []
 for key, entry in sorted(paired.items()):
     model_r = np.asarray(entry["model_rmse"], float)
     pers_r = np.asarray(entry["persistence_rmse"], float)
-    diff = model_r - pers_r            # >0 = 模型比 persistence 差
+    diff = model_r - pers_r            # >0 = model worse than persistence
     seeds = entry["seeds"]
     try:
         stat, pw = wilcoxon(model_r, pers_r, alternative="two-sided",
                             method="exact", zero_method="wilcox")
-    except ValueError:                 # 全部差值为 0 的退化情形
+    except ValueError:                 # degenerate case of all-zero differences
         stat, pw = float("nan"), 1.0
     dz = cohens_dz(diff)
     rows.append(dict(comparison=key, n=len(seeds), seeds=";".join(map(str, seeds)),
@@ -83,13 +83,13 @@ with open(out_csv, "w", newline="", encoding="utf-8") as f:
     for r in sorted(rows, key=lambda r: (r["comparison"].split("|")[0], r["comparison"])):
         w.writerow({c: r[c] for c in cols})
 
-print(f"已写 {out_csv}\n")
-print("=== 正文 6 组 ft 配对（Wilcoxon exact + Holm + dz） ===")
+print(f"wrote {out_csv}\n")
+print("=== the 6 ft pairs of the main text (Wilcoxon exact + Holm + dz) ===")
 for r in sorted(ft_rows, key=lambda r: r["comparison"]):
     print(f"  {r['comparison']:28s} dz={r['cohens_dz']:+.2f}  p_wil={r['wilcoxon_p']:.4f}  "
           f"p_holm={r['holm_p']:.4f}  rej={r['holm_reject_0.05']}  "
-          f"(旧 t={r['t_old']}, p_old={r['p_old']})")
-print("\n=== n=5 说明 ===")
-print("Wilcoxon signed-rank 在 n=5 时双侧最小可能 p=0.0625，")
-print("因此任何逐种子配对在 0.05 水平都不可能拒绝 H0——显著性结论应表述为")
-print("效应量 + p 值上界，而非 'p<0.05'。")
+          f"(old t={r['t_old']}, p_old={r['p_old']})")
+print("\n=== n=5 note ===")
+print("With n=5, the two-sided Wilcoxon signed-rank has a smallest possible p of 0.0625,")
+print("so no per-seed pairing can reject H0 at the 0.05 level; significance should be stated as")
+print("effect size + a p-value bound, not as 'p<0.05'.")

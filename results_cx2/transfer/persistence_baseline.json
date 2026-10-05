@@ -6,21 +6,21 @@
     "macro_rmse": 0.061374,
     "n_windows": 22608,
     "ref": 0.0609,
-    "check": "与外部初始参考值 0.0609 差 +0.0056（口径差异，见脚本注释）"
+    "check": "differs from initial reference 0.0609 by +0.0056 (convention difference, see header comment)"
    },
    "10": {
     "rmse": 0.083191,
     "macro_rmse": 0.075871,
     "n_windows": 22342,
     "ref": 0.0761,
-    "check": "与外部初始参考值 0.0761 差 +0.0071（口径差异，见脚本注释）"
+    "check": "differs from initial reference 0.0761 by +0.0071 (convention difference, see header comment)"
    },
    "20": {
     "rmse": 0.106628,
     "macro_rmse": 0.096493,
     "n_windows": 21822,
     "ref": 0.0977,
-    "check": "与外部初始参考值 0.0977 差 +0.0089（口径差异，见脚本注释）"
+    "check": "differs from initial reference 0.0977 by +0.0089 (convention difference, see header comment)"
    }
   },
   "NASA": {
@@ -465,5 +465,5 @@
    "model_wins": 5
   }
  },
- "note": "paired.t>0 = 模型均值差于持久基线；model_wins = 模型 RMSE 更小的种子数"
+ "note": "paired.t>0 = model mean worse than persistence; model_wins = seeds with lower model RMSE"
 }

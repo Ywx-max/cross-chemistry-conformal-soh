@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
-"""重建 calce_curve_features.csv：build_modeling_table.py 的曲线特征输入。
+"""Rebuild calce_curve_features.csv: the curve-feature input of build_modeling_table.py.
 
-背景：论文表 6 的 curve14 消融依赖 calce_curve_features.csv，但产出它的驱动脚本
-此前不在仓库（只有 03_实验 留档的参考产物）。本脚本基于 parse_calce_v2 的既有
-特征函数（ica_curve/ica_shape/dch_curve_feats/process_xlsx_cell/process_txt_cell）
-重建同一产物：每电芯跑特征流（**不做**容量对齐，含 v_q 为空的循环——这是本 CSV
-与 calce_full_v2.csv 的行数差异来源），列名 cycle→cycle_id 供 build_modeling_table
- rename 使用。
+Background: the curve14 ablation of Table 6 depends on calce_curve_features.csv, but the driver that produced
+it was not in the repository (only the archived reference artifact). This script rebuilds the same artifact
+from the existing feature functions of parse_calce_v2
+(ica_curve/ica_shape/dch_curve_feats/process_xlsx_cell/process_txt_cell): every cell runs the feature stream
+(WITHOUT capacity alignment, keeping cycles whose v_q is empty, which is where this CSV differs in row count from calce_full_v2.csv),
+with the column renamed cycle->cycle_id for build_modeling_table to rename back.
 
-列（与 2026-09 参考产物逐列一致）：
+Columns (matching the 2026-09 reference artifact column by column):
   battery_id, cycle_id, ica2_peak, ica_fwhm, ica_main_V, ica_main_peak,
   v_q10, v_q30, v_q50, v_q70, v_q90
-其中 ica_main_* / ica2_peak / ica_fwhm 来自充电段 ICA（3.90-4.19 V 窗），
-v_q* 来自放电段（2.0-3.5 V 定分数容量电压点）。
+where ica_main_* / ica2_peak / ica_fwhm come from the charging-segment ICA (3.90-4.19 V window) and
+v_q* from the discharge segment (fixed-quantile capacity-voltage points over 2.0-3.5 V).
 
-运行：python code/data_prep/build_calce_curve_features.py --cells cs2 [--out data/calce_curve_features.csv]
-      --cells cs2 = 仅 CS2 8 颗（回归验证用）；--cells full = CS2 + CX2 16 颗
-输出：data/calce_curve_features.csv"""
+Run: python code/data_prep/build_calce_curve_features.py --cells cs2 [--out data/calce_curve_features.csv]
+      --cells cs2 = the 8 CS2 cells only (for regression against the reference artifact); --cells full = CS2 + CX2, 16 cells
+Output: data/calce_curve_features.csv"""
 import argparse
 import time
 from pathlib import Path
@@ -35,7 +35,7 @@ TXT_CELLS = ["CS2_8", "CS2_21", "CX2_31"]
 def cell_zip(cell):
     p = CAL / f"{cell}.zip"
     if not p.exists():
-        raise FileNotFoundError(f"缺少原始 zip: {p}")
+        raise FileNotFoundError(f"raw zip missing: {p}")
     return p
 
 
@@ -43,8 +43,8 @@ def build(cells):
     frames = []
     for cell in cells:
         z = cell_zip(cell)
-        # 格式判别：zip 内含 .xlsx 即 Arbin xlsx 路径（CX2 的混合 zip 里 .txt 是
-        # 特殊测试的日志成员，不能据此判成 CADEX txt——CX2_16/33 都混有 txt 日志）
+        # format detection: a zip containing .xlsx is the Arbin path (in the mixed CX2 zips a .txt member is
+        # a special-test log, not evidence of a CADEX txt cell; CX2_16/33 both carry txt logs)
         import zipfile
         with zipfile.ZipFile(z) as zf:
             has_xlsx = any(n.lower().endswith(".xlsx") for n in zf.namelist())
@@ -59,7 +59,7 @@ def build(cells):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cells", choices=["cs2", "full"], default="cs2",
-                    help="cs2 = 仅 CS2 8 颗（与 2026-09 参考产物回归验证用）；full = CS2+CX2 16 颗")
+                    help="cs2 = the 8 CS2 cells only (for regression against the 2026-09 reference artifact); full = CS2+CX2, 16 cells")
     ap.add_argument("--out", default="data/calce_curve_features.csv")
     args = ap.parse_args()
     t0 = time.time()
@@ -67,7 +67,7 @@ def main():
         [c for c in XLSX_CELLS + TXT_CELLS if c.startswith("CS2")]
     cal = build(sorted(cells))
     cal.to_csv(args.out, index=False, encoding="utf-8-sig")
-    print(f"已输出 {args.out}（{len(cal)} 行, {time.time()-t0:.0f}s）")
+    print(f"written {args.out} ({len(cal)} rows, {time.time()-t0:.0f}s)")
 
 
 if __name__ == "__main__":

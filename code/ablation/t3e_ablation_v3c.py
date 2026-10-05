@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""T3e = T3c 消融协议在建模表 v3c 上的复跑（数据版本对照之二，论文最终采用版）。
+"""T3e = the T3c ablation protocol rerun on modeling table v3c (data-version control, part two; the version used in the manuscript).
 
-与 t3c_ablation_local.py 唯一的区别：DATA 指向建模表_v3c.csv，输出前缀 t3e_。
-checks/final_data_check.py 里表 6 的数字核对用的就是 ablation_v3c 的结果，
-即本脚本（经聚合后）的产出。协议细节见 t3c_ablation_local.py。"""
+The only difference from t3c_ablation_local.py: DATA points to modeling_table_v3c.csv and outputs use the t3e_ prefix.
+The Table 6 numbers in checks/final_data_check.py are checked against the ablation_v3c results,
+i.e. the (aggregated) output of this script. Protocol details in t3c_ablation_local.py."""
 import argparse, json, os, random, time
 import numpy as np
 import pandas as pd
@@ -11,23 +11,23 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-# base7（历史名，现为 6 维）= 剔除 charge_dur_s（MIT 缺失）和 soh。
-# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
-# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+# base7 (historical name, now 6 features) = drop charge_dur_s (missing for MIT) and soh.
+# soh must be dropped: it is the label of the SOH task, and a label in the inputs hands the answer to the model
+# (before the 2026-10-03 fix an identity-copy baseline scored RMSE=0, the leak in plain sight).
 FEATS_BASE6 = ["capacity_Ah", "discharge_dur_s", "v_mean_V", "v_min_V",
               "ica_peak", "ica_peak_V"]
-# 超前步长：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前 SOH 预测）。
+# horizon: label = soh at H cycles after the last row of the window (H-step-ahead SOH prediction).
 H = 10
-# 曲线增强: +定分数容量电压点(v_q10..v_q90) +ICA次峰 +半高宽
+# curve features: + fixed-quantile capacity-voltage points (v_q10..v_q90) + ICA secondary peak + FWHM
 FEATS_CURVE13 = FEATS_BASE6 + ["v_q10", "v_q30", "v_q50", "v_q70", "v_q90",
                                "ica2_peak", "ica_fwhm"]
-FEATS = FEATS_BASE6  # 运行时由 --feats 覆盖
+FEATS = FEATS_BASE6  # overridden at runtime by --feats
 WINDOW = 20
-# 建模表路径（数据放 data/ 下即可，合并方法见 code/README.md）
-DATA = "data/建模表_v3c.csv"
+# modeling-table path (data goes under data/; merge procedure in code/README.md)
+DATA = "data/modeling_table_v3c.csv"
 
 def set_seed(seed):
-    """固定随机源（GPU 卷积仍非确定性，重跑有小幅浮动，见 t2_train_local 同名函数）。"""
+    """Fix the random sources (GPU convolution stays nondeterministic, so reruns move a little; see the same-named function in t2_train_local)."""
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -142,29 +142,29 @@ def main():
     ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--ft-epochs", type=int, default=60)
     ap.add_argument("--horizon", type=int, default=H,
-                    help="超前步长：标签 = 窗口末行后第 H 个循环的 soh")
+                    help="horizon: label = soh at H cycles after the last window row")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--feats", default="base7", choices=["base7", "curve14"])
     ap.add_argument("--out", default="results/ablation")
     ap.add_argument("--deterministic", action="store_true",
-                    help="开启 cuDNN/PyTorch 确定性算法（诊断跨管线复现性用；默认关闭，"
-                         "与论文发布结果的生产环境一致）")
-    ap.add_argument("--data", default=DATA, help="建模表 csv 路径")
+                    help="enable cuDNN/PyTorch deterministic algorithms (for cross-pipeline reproducibility diagnostics; off by default, "
+                         "matching the production environment of the released results)")
+    ap.add_argument("--data", default=DATA, help="modeling-table csv path")
     ap.add_argument("--src-cache", default=None,
-                    help="统一源模型缓存目录：命中则跳过源域预训练，未命中则训练后写入")
+                    help="unified source-model cache directory: a hit skips source pre-training, a miss trains and writes it")
     args = ap.parse_args()
-    # 特征集在运行时切换：base7（历史名）= 论文的“基础 6 维”，curve14（历史名）= “曲线增强 13 维”
+    # the feature set is switched at runtime: base7 (historical name) = the paper's base-6, curve14 = curve-13
     global FEATS
     FEATS = FEATS_BASE6 if args.feats == "base7" else FEATS_CURVE13
     if args.deterministic:
-        # CUBLAS_WORKSPACE_CONFIG 必须在首个 CUDA 操作前设置
+        # CUBLAS_WORKSPACE_CONFIG must be set before the first CUDA operation
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         torch.use_deterministic_algorithms(True, warn_only=True)
         print("[deterministic] cuDNN/PyTorch deterministic algorithms ON", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"T3b(逐数据集标准化) device={device} model={args.model}", flush=True)
+    print(f"T3b (per-dataset standardization) device={device} model={args.model}", flush=True)
     df = pd.read_csv(args.data)
     src = build_windows_ds(df, "MIT", horizon=args.horizon)
     src_bids = sorted(src)
@@ -174,15 +174,15 @@ def main():
     Xva, yva, _ = concat_cells(src, src_bids[-n_va:])
     sc_src = StandardScaler().fit(Xtr.reshape(-1, Xtr.shape[2]))
     Xtr, Xva = std_with(sc_src, Xtr), std_with(sc_src, Xva)
-    print(f"源域 MIT: 训练电芯 {len(src_bids)-n_va}, 窗口 {len(Xtr)}", flush=True)
-    set_seed(args.seed)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    print(f"source MIT: train cells {len(src_bids)-n_va}, windows {len(Xtr)}", flush=True)
+    set_seed(args.seed)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model = new_model(args.model, Xtr.shape[2]).to(device)
     import os as _os
     _cache_hit = None
     if args.src_cache:
         _os.makedirs(args.src_cache, exist_ok=True)
-        # base7 源模型与其他脚本共用（统一缓存）；curve14 的输入维度不同，
-        # 必须用带特征集后缀的独立缓存名，严禁回退到 7 维旧缓存
+        # the base7 source model is shared with the other scripts (unified cache); curve14 has different input
+        # dimensions and must keep its own feature-suffixed cache name, never falling back to the old 7-feature cache
         if args.feats == "base7":
             _hit = _os.path.join(args.src_cache, f"src_{args.model}_s{args.seed}_ep{args.epochs}.pt")
             _legacy = _os.path.join(args.src_cache, f"t4d_src_{args.model}_s{args.seed}.pt")
@@ -192,16 +192,16 @@ def main():
             _cache_hit = _hit if _os.path.exists(_hit) else None
     if _cache_hit:
         model.load_state_dict(torch.load(_cache_hit, map_location=device, weights_only=True))
-        print(f"[cache] 源模型 {_cache_hit}", flush=True)
+        print(f"[cache] source model {_cache_hit}", flush=True)
     else:
         t0 = time.time()
         model = fit_model(model, Xtr, ytr, args.epochs, args.seed, device, Xva, yva)
-        print(f"源域训练完成 {time.time()-t0:.0f}s", flush=True)
+        print(f"source-domain training done in {time.time()-t0:.0f}s", flush=True)
         if args.src_cache:
             _sfx = "" if args.feats == "base7" else f"_{args.feats}"
             _save = _os.path.join(args.src_cache, f"src_{args.model}_s{args.seed}_ep{args.epochs}{_sfx}.pt")
             torch.save(model.state_dict(), _save)
-            print(f"[cache] 源模型已写入 {_save}", flush=True)
+            print(f"[cache] source model written to {_save}", flush=True)
     results = {"model": args.model, "task": "soh", "protocol": "per-dataset-std", "feats": args.feats,
                "seed": args.seed, "horizon": args.horizon, "targets": {}}
     for tgt_name in ["CALCE", "NASA"]:
@@ -210,7 +210,7 @@ def main():
         n_ft = max(1, len(tb) // 2)
         random.Random(args.seed).shuffle(tb)
         ft_bids, te_bids = tb[:n_ft], tb[n_ft:]
-        # 目标域 scaler: 全部目标窗口的无标签统计量(标准无监督DA口径)
+        # target-domain scaler: unlabeled statistics of all target windows (standard unsupervised DA scope)
         Xall_t, yall_t, _ = concat_cells(tgt, tb)
         sc_tgt = StandardScaler().fit(Xall_t.reshape(-1, Xall_t.shape[2]))
         Xte, yte, _ = concat_cells(tgt, te_bids)
@@ -218,12 +218,12 @@ def main():
         Xft, yft, _ = concat_cells(tgt, ft_bids)
         ft_model = new_model(args.model, Xtr.shape[2]).to(device)
         ft_model.load_state_dict(model.state_dict())
-        # 微调 lr=3e-4（比源域小一个量级），与 t3b 主实验一致。
-        # 消融只动特征集，其他变量全部锁死，差异才能归因到特征上
+        # fine-tuning lr=3e-4 (an order below the source), as in the t3b main experiment.
+        # the ablation changes the feature set only and locks every other variable, so differences are attributable to features
         ft_model = fit_model(ft_model, std_with(sc_tgt, Xft), yft,
                              args.ft_epochs, args.seed, device, lr=3e-4)
         r_ft = eval_model(ft_model, std_with(sc_tgt, Xte), yte, device)
-        set_seed(args.seed)  # target-only 从随机初始化训起，同样先定随机源
+        set_seed(args.seed)  # target-only starts from random init; fix the seed first as well
         to_model = new_model(args.model, Xtr.shape[2]).to(device)
         to_model = fit_model(to_model, std_with(sc_tgt, Xft), yft,
                              args.ft_epochs, args.seed, device, lr=1e-3)

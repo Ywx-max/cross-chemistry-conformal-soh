@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""T2 源域基线：四种骨干（LSTM/GRU/TCN/Transformer）在 MIT-Stanford 上的 RUL 预测。
+"""T2 source-domain baselines: four backbones (LSTM/GRU/TCN/Transformer) on MIT-Stanford for RUL prediction.
 
-这是训练侧的起点：先在这里比较四种骨干、选出迁移骨干（论文选了 TCN，精度与
-Transformer 同档、训练便宜得多，理由见论文 4.2），再进入 ../transfer/ 的跨域迁移。
+This is the training-side starting point: compare the four backbones and pick the transfer backbone (the paper
+picks the TCN, on par with the Transformer in accuracy and far cheaper to train; Section 4.2), then move to the cross-domain transfer under ../transfer/.
 
-评估用 5 折"组"交叉验证：按电芯分组切折，同一颗电芯的窗口要么整颗进训练、
-要么整颗进测试。相邻循环的窗口几乎一样，若按窗口随机切分，测试集会被训练集
-"背过答案"，指标虚高得毫无意义。
+Evaluation uses 5-fold group CV: folds are cut by cell, so all windows of a cell go entirely into training
+or entirely into the test fold. Adjacent-cycle windows are near-duplicates, and a random window-level split
+would let the test set memorise answers, inflating metrics meaninglessly.
 
-运行：python t2_train_local.py --model tcn --smoke   # 单电芯过拟合自检
-      python t2_train_local.py --model tcn --folds 5 # 正式 5 折
-输入：建模表_v3.csv；输出：results/baselines/<model>_f<fold>_s<seed>.json（逐折 + 汇总）"""
+Run: python t2_train_local.py --model tcn --smoke   # single-cell overfit self-check
+      python t2_train_local.py --model tcn --folds 5 # full 5-fold run
+Input: modeling_table_v3.csv; output: results/baselines/<model>_f<fold>_s<seed>.json (per fold + summary)"""
 import argparse, json, os, random, time
 import numpy as np
 import pandas as pd
@@ -19,31 +19,31 @@ import torch.nn as nn
 from sklearn.model_selection import GroupKFold
 from sklearn.preprocessing import StandardScaler
 
-# 8 维循环级特征。charge_dur_s 只在 MIT/CALCE 有、NASA 缺失，所以这里用 8 维；
-# 到 T3b 逐数据集标准化协议会剔除 charge_dur_s 与 soh 降为 6 维（见 ../transfer/t3b_std_local.py；SOH 任务中 soh 作输入即标签泄漏，2026-10-03 剔除）。
+# 8 cycle-level features. charge_dur_s exists for MIT/CALCE but not NASA, hence 8 here;
+# the T3b per-dataset protocol drops charge_dur_s and soh down to 6 (see ../transfer/t3b_std_local.py; soh as an input is label leakage in the SOH task, dropped 2026-10-03).
 FEATS = ["capacity_Ah", "soh", "discharge_dur_s", "v_mean_V", "v_min_V",
          "ica_peak", "ica_peak_V", "charge_dur_s"]
 WINDOW = 20
-# 建模表路径（数据放 data/ 下即可，合并方法见 code/README.md）
-DATA = "data/建模表_v3.csv"
+# modeling-table path (data goes under data/; merge procedure in code/README.md)
+DATA = "data/modeling_table_v3.csv"
 
 def set_seed(seed):
-    """固定三处随机源。注意这只保证划分/初始化/洗牌可复现：GPU 卷积本身非确定性，
-    同配置重跑仍有零点几到几个百分点的浮动。论文报 5 种子统计就是为此。"""
+    """Fix the three random sources. This makes splits/initialisation/shuffles reproducible only: GPU convolution
+    stays nondeterministic and same-configuration reruns still move by fractions of a percent to a few percent, which is why the paper reports 5-seed statistics."""
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
 def build_windows(df, window=WINDOW):
-    # 只收循环号严格连续的窗口：休眠/补测造成的循环号跳变口不收，
-    # 避免把"时间断裂"喂给模型；RUL 缺失（未观测到 EOL）的行一并剔除。
+    # keep only windows with strictly consecutive cycle numbers: gaps from rest periods/retests are excluded
+    # so no time break is fed to the model; rows without RUL (EOL not observed) are dropped as well.
     cells = {}
     for bid, g in df.sort_values("cycle").groupby("battery_id"):
         f = g[FEATS].astype(float).copy()
         f = f.interpolate(limit_direction="both").fillna(0.0).values
         cyc = g["cycle"].values
         rul = g["rul"].astype(float).values
-        # 负 RUL = 电芯超过 EOL 后仍在测试的行，标签无物理意义，不入训/不入评
-        # （2026-10-03 修复：MIT 曾有 11.3%、NASA 29.3% 的负 RUL 行混入训练）
+        # negative RUL = rows past EOL still under test; labels without physical meaning, excluded from training and evaluation
+        # (2026-10-03 fix: MIT had 11.3% and NASA 29.3% negative-RUL rows leaking into training)
         ok = (~np.isnan(rul)) & (rul >= 0)
         f, cyc, rul = f[ok], cyc[ok], rul[ok]
         X, y = [], []
@@ -55,8 +55,8 @@ def build_windows(df, window=WINDOW):
     return cells
 
 class CausalBlock(nn.Module):
-    """膨胀因果卷积 + 残差。"因果"= 每步只看过去，不偷看未来；左 padding 补的零
-    会混进序列尾部，forward 里切掉，否则窗口末端（真正拿去预测的位置）被污染。"""
+    """Dilated causal convolution + residual. Causal = each step sees the past only, no peeking ahead; the
+    zero padding on the left would bleed into the window tail, so forward slices it off, else the window end (the position actually used for prediction) is polluted."""
     def __init__(self, in_ch, out_ch, k, dil):
         super().__init__()
         self.pad = (k - 1) * dil
@@ -81,8 +81,8 @@ class TCN(nn.Module):
         return self.fc(h[:, :, -1]).squeeze(-1)
 
 class Transformer(nn.Module):
-    """轻量 Transformer：3 层 / d=128 / 4 头，可学习位置编码。
-    精度与 TCN 同档但训练慢数倍，这是最终选 TCN 做迁移骨干的原因之一。"""
+    """Lightweight Transformer: 3 layers / d=128 / 4 heads, learnable positional encoding.
+    Accuracy on par with the TCN but several times slower to train, one reason the TCN was chosen as the transfer backbone."""
     def __init__(self, input_dim, d=128, heads=4, layers=3):
         super().__init__()
         self.inp = nn.Linear(input_dim, d)
@@ -113,7 +113,7 @@ def new_model(name, input_dim):
     raise ValueError(name)
 
 def train_one(model_name, Xtr, ytr, Xte, yte, epochs, seed, device, Xva=None, yva=None):
-    """训练并评估一个折。早停盯验证折损失（patience=10），200 轮上限经常跑不满。"""
+    """Train and evaluate one fold. Early stopping watches the validation-fold loss (patience=10); the 200-epoch cap is rarely reached."""
     set_seed(seed)
     model = new_model(model_name, Xtr.shape[2]).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -163,33 +163,33 @@ def main():
     df = df[df["dataset"] == args.dataset]
     cells = build_windows(df)
     bids = sorted(cells)
-    print(f"有效窗口电芯: {len(bids)}/{df['battery_id'].nunique()}", flush=True)
+    print(f"cells with valid windows: {len(bids)}/{df['battery_id'].nunique()}", flush=True)
     if args.smoke:
-        # 冒烟自检：拿一颗电芯自己训自己，RMSE 应压到接近 0；压不下去 = 管线有 bug。
-        # 写/改训练代码时这是最便宜的"通不通"判据，任何改动后建议先跑一遍。
+        # smoke self-check: train a cell on itself; RMSE should collapse near zero, and if it does not the pipeline has a bug.
+        # The cheapest "does it run" criterion when writing or editing training code; run it after any change.
         bid = bids[0]
         X, y = cells[bid]
         n = len(X); tr_n = int(n * 0.8)
         sc = StandardScaler().fit(X[:tr_n].reshape(-1, X.shape[2]))
         Xt = (X - sc.mean_) / (sc.scale_ + 1e-8)
         rmse, mae, ep = train_one(args.model, Xt[:tr_n], y[:tr_n], Xt[:tr_n], y[:tr_n], 50, args.seed, device)
-        print(f"[SMOKE 过拟合自检] {bid}: train RMSE={rmse:.2f} MAE={mae:.2f} epochs={ep}", flush=True)
+        print(f"[SMOKE overfit self-check] {bid}: train RMSE={rmse:.2f} MAE={mae:.2f} epochs={ep}", flush=True)
         rmse, mae, ep = train_one(args.model, Xt[:tr_n], y[:tr_n], Xt[tr_n:], y[tr_n:], 100, args.seed, device)
-        print(f"[SMOKE 保留集] {bid}: test RMSE={rmse:.2f} MAE={mae:.2f} epochs={ep}", flush=True)
+        print(f"[SMOKE held-out] {bid}: test RMSE={rmse:.2f} MAE={mae:.2f} epochs={ep}", flush=True)
         return
     X_all = np.concatenate([cells[b][0] for b in bids])
     y_all = np.concatenate([cells[b][1] for b in bids])
     g_all = np.concatenate([[b] * len(cells[b][0]) for b in bids])
     gkf = GroupKFold(n_splits=args.folds)
     res, t0 = [], time.time()
-    # 组交叉验证正式跑批
+    # full group-cross-validation batch
     for k, (tri, tei) in enumerate(gkf.split(X_all, y_all, g_all)):
-        # scaler 只用训练折拟合：拿全量拟合会把测试折的均值方差泄漏进来
+        # the scaler is fitted on the training fold only: fitting on everything would leak the test fold's mean and variance
         sc = StandardScaler().fit(X_all[tri].reshape(-1, X_all.shape[2]))
-        # 训练/验证/测试三处一律用同一套统计量标准化（scaler 只用训练集拟合）。
+        # train/validation/test all use the same statistics for standardization (scaler fitted on the training set only).
         Xtr = (X_all[tri] - sc.mean_) / (sc.scale_ + 1e-8)
         Xte = (X_all[tei] - sc.mean_) / (sc.scale_ + 1e-8)
-        # 从训练折尾部切 12% 做早停验证（仍按窗口切：只用来决定何时停，不报指标）
+        # the last 12% of the training fold serves as early-stopping validation (still split by window: it only decides when to stop, no metrics reported)
         n_va = max(1, int(len(tri) * 0.12))
         rmse, mae, ep = train_one(args.model, Xtr[:-n_va], y_all[tri][:-n_va],
             Xte, y_all[tei],

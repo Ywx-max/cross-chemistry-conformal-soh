@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
-"""保形机制重算（2026-10-04 修订清单 A3）：
-用 results_cx2/conformal 逐种子数据重算 4 项相关，判定 §4.5 机制段去留。
+"""Conformal-mechanism recomputation (2026-10-04 checklist A3):
+recomputes four correlations from the per-seed results_cx2/conformal data to decide the fate of the Section 4.5 mechanism paragraph.
 
-每个配置点 = (骨干, 种子, 目标域)：2 骨干 × 5 种子 × 2 目标域 = 20 点。
+Each configuration point = (backbone, seed, target domain): 2 backbones x 5 seeds x 2 domains = 20 points.
 
-  rho1（主判据）: q_src/median|r|  与 PICP_src
-  rho2:            q_src            与 PICP_src
-  rho3:            q_src/RMSE       与 PICP_src
-  rho4:            RMSE             与 PICP_src
+  rho1 (primary): q_src/median|r|  vs PICP_src
+  rho2:            q_src            vs PICP_src
+  rho3:            q_src/RMSE       vs PICP_src
+  rho4:            RMSE             vs PICP_src
 
-其中 q_src = 源域校准分位数；median|r| = 该目标域全部测试电芯残差绝对值的
-中位数（合并 per_cell[*].residuals）；PICP_src = 源域校准经验覆盖率。
+where q_src = source-domain calibration quantile; median|r| = median of the absolute residuals of all
+test cells in that target domain (pooled over per_cell[*].residuals); PICP_src = empirical source-calibrated coverage.
 
-判定（清单 A3-2）：rho1 仍高且方向为正（比值越大、源域校准覆盖越高）→
-保留机制段并按新值改写；否则删除机制段，§4.5 改写为"两个目标域均全面
-失覆盖，程度差异主要来自残差尺度与任务难度"。
+Decision rule (checklist A3-2): if rho1 stays high and positive (larger ratio, higher source-calibrated
+coverage), keep the mechanism paragraph and rewrite it with the new values; otherwise drop it and recast
+Section 4.5 as "both domains under-cover throughout, with severity differences driven mainly by residual scale and task difficulty".
 
     python code/checks/conformal_mechanism.py
 
-输出: results_cx2/conformal/mechanism_correlations.json（stdout 同步打印）。
+Output: results_cx2/conformal/mechanism_correlations.json (also printed to stdout).
 """
 import json, math
 from pathlib import Path
@@ -93,7 +93,7 @@ def main():
               "rho3": (ratio_rmse, cov), "rho4": (rm, cov)}
     out = {
         "n_points": len(pts),
-        "note": "20 配置点 = 2 骨干 × 5 种子 × 2 目标域；数据源 results_cx2/conformal/t4_*.json",
+        "note": "20 configuration points = 2 backbones x 5 seeds x 2 target domains; data: results_cx2/conformal/t4_*.json",
         "pointwise": pts,
         "pearson": {k: pearson(*series[k[:4]]) for k in keys},
         "spearman": {k: spearman(*series[k[:4]]) for k in keys},

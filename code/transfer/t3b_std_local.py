@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""T3b 逐数据集标准化协议。论文"漂移分解"的第二块拼图。
+"""T3b per-dataset standardization protocol. The second piece of the paper's drift decomposition.
 
-与 t3_transfer_local.py 唯一的区别在标准化方式：
-  原始协议（t3）  ：目标域直接沿用源域 scaler → 量纲漂移 + 关系漂移一起作用
-  本协议（t3b）  ：源域、目标域各用各的 scaler（目标域统计量不涉及任何标签，
-                   属于标准的无监督域适应口径）→ 量纲漂移被先行消除
+The only difference from t3_transfer_local.py is the standardization:
+  original protocol (t3): the target domain reuses the source scaler, so scale drift and relationship drift act together
+  this protocol (t3b):  source and target each use their own scaler (target statistics involve no labels,
+                        the standard unsupervised domain-adaptation setting), removing scale drift first
 
-两个协议一对照，跨域失效就被拆成了两块：MIT→CALCE 原始协议 RMSE ~1636，
-逐数据集标准化后 ~0.147，量纲漂移占了大头；而剩下的 0.147 仍远高于目标域
-基线 ~0.035，那部分才是化学体系本质差异（关系漂移），只能靠微调吸收。
+Comparing the two protocols splits the cross-domain failure in two: MIT->CALCE original protocol RMSE ~1636,
+~0.147 after per-dataset standardization, so scale drift dominates; the remaining 0.147 still far exceeds the
+target-only baseline ~0.035, and that part is the chemistry-level difference (relationship drift) that only fine-tuning can absorb.
 
-运行：python t3b_std_local.py --model tcn --seed 42
-输出：results/transfer/t3b_<model>_s<seed>.json"""
+Run: python t3b_std_local.py --model tcn --seed 42
+Output: results/transfer/t3b_<model>_s<seed>.json"""
 import argparse, json, os, random, time
 import numpy as np
 import pandas as pd
@@ -19,20 +19,20 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-# 6 维特征 = T2 的 8 维剔除 charge_dur_s（MIT 源域整列缺失）和 soh。
-# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
-# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+# 6 features = the 8 of T2 minus charge_dur_s (missing across the MIT source) and soh.
+# soh must be dropped: it is the label of the SOH task, and a label in the inputs hands the answer to the model
+# (before the 2026-10-03 fix an identity-copy baseline scored RMSE=0, the leak in plain sight).
 FEATS = ["capacity_Ah", "discharge_dur_s", "v_mean_V", "v_min_V",
          "ica_peak", "ica_peak_V"]
 WINDOW = 20
-# 超前步长：标签取窗口末行之后第 H 个循环的 soh（任务 = H 步超前 SOH 预测）。
-# 寿命末端不足 H 步的窗口丢弃（cyc 连续性检查同时保证窗口到标签之间无缺循环）。
+# horizon: label = soh at H cycles after the last row of the window (task = H-step-ahead SOH prediction).
+# windows closer than H steps to the record end are dropped (the cyc continuity check also guarantees no cycle gaps to the label).
 H = 10
-# 建模表路径（数据放 data/ 下即可，合并方法见 code/README.md）
-DATA = "data/建模表_v3.csv"
+# modeling-table path (data goes under data/; merge procedure in code/README.md)
+DATA = "data/modeling_table_v3.csv"
 
 def set_seed(seed):
-    """固定随机源（GPU 卷积仍非确定性，重跑有小幅浮动，见 t2_train_local 同名函数）。"""
+    """Fix the random sources (GPU convolution stays nondeterministic, so reruns move a little; see the same-named function in t2_train_local)."""
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -147,25 +147,25 @@ def main():
     ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--ft-epochs", type=int, default=60)
     ap.add_argument("--horizon", type=int, default=H,
-                    help="超前步长：标签 = 窗口末行后第 H 个循环的 soh")
+                    help="horizon: label = soh at H cycles after the last window row")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default="results/transfer")
     ap.add_argument("--deterministic", action="store_true",
-                    help="开启 cuDNN/PyTorch 确定性算法（诊断跨管线复现性用；默认关闭，"
-                         "与论文发布结果的生产环境一致）")
-    ap.add_argument("--data", default=DATA, help="建模表 csv 路径")
+                    help="enable cuDNN/PyTorch deterministic algorithms (for cross-pipeline reproducibility diagnostics; off by default, "
+                         "matching the production environment of the released results)")
+    ap.add_argument("--data", default=DATA, help="modeling-table csv path")
     ap.add_argument("--src-cache", default=None,
-                    help="统一源模型缓存目录：命中则跳过源域预训练，未命中则训练后写入")
+                    help="unified source-model cache directory: a hit skips source pre-training, a miss trains and writes it")
     args = ap.parse_args()
     if args.deterministic:
-        # CUBLAS_WORKSPACE_CONFIG 必须在首个 CUDA 操作前设置
+        # CUBLAS_WORKSPACE_CONFIG must be set before the first CUDA operation
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         torch.use_deterministic_algorithms(True, warn_only=True)
         print("[deterministic] cuDNN/PyTorch deterministic algorithms ON", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"T3b(逐数据集标准化) device={device} model={args.model}", flush=True)
+    print(f"T3b (per-dataset standardization) device={device} model={args.model}", flush=True)
     df = pd.read_csv(args.data)
     src = build_windows_ds(df, "MIT", horizon=args.horizon)
     src_bids = sorted(src)
@@ -175,8 +175,8 @@ def main():
     Xva, yva, _ = concat_cells(src, src_bids[-n_va:])
     sc_src = StandardScaler().fit(Xtr.reshape(-1, Xtr.shape[2]))
     Xtr, Xva = std_with(sc_src, Xtr), std_with(sc_src, Xva)
-    print(f"源域 MIT: 训练电芯 {len(src_bids)-n_va}, 窗口 {len(Xtr)}", flush=True)
-    set_seed(args.seed)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    print(f"source MIT: train cells {len(src_bids)-n_va}, windows {len(Xtr)}", flush=True)
+    set_seed(args.seed)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model = new_model(args.model, Xtr.shape[2]).to(device)
     import os as _os
     _cache_hit = None
@@ -188,16 +188,16 @@ def main():
         _cache_hit = _hit if _os.path.exists(_hit) else (_legacy if _os.path.exists(_legacy) else None)
     if _cache_hit:
         model.load_state_dict(torch.load(_cache_hit, map_location=device, weights_only=True))
-        print(f"[cache] 源模型 {_cache_hit}", flush=True)
+        print(f"[cache] source model {_cache_hit}", flush=True)
     else:
         t0 = time.time()
         model = fit_model(model, Xtr, ytr, args.epochs, args.seed, device, Xva, yva)
-        print(f"源域训练完成 {time.time()-t0:.0f}s", flush=True)
+        print(f"source-domain training done in {time.time()-t0:.0f}s", flush=True)
         if args.src_cache:
             _save = _os.path.join(args.src_cache,
                                   f"src_{args.model}_s{args.seed}_ep{args.epochs}_h{args.horizon}.pt")
             torch.save(model.state_dict(), _save)
-            print(f"[cache] 源模型已写入 {_save}", flush=True)
+            print(f"[cache] source model written to {_save}", flush=True)
     results = {"model": args.model, "task": "soh", "protocol": "per-dataset-std",
                "seed": args.seed, "horizon": args.horizon, "targets": {}}
     for tgt_name in ["CALCE", "NASA"]:
@@ -206,22 +206,22 @@ def main():
         n_ft = max(1, len(tb) // 2)
         random.Random(args.seed).shuffle(tb)
         ft_bids, te_bids = tb[:n_ft], tb[n_ft:]
-        # 目标域 scaler: 全部目标窗口的无标签统计量(标准无监督DA口径)
+        # target-domain scaler: unlabeled statistics of all target windows (standard unsupervised DA scope)
         Xall_t, yall_t, _ = concat_cells(tgt, tb)
-        # 关键一步：目标域 scaler 用全部目标窗口的"无标签"统计量拟合。
-        # 只用特征分布、不碰 y，所以不算偷答案。这是无监督 DA 的标准设定，
-        # 也是"目标域统计量的使用不涉及任何目标域标签"这句论文声明的代码出处。
+        # the key step: the target scaler is fitted on the "unlabeled" statistics of all target windows.
+        # It touches the feature distribution only, never y, so it is not peeking. This is the standard unsupervised-DA
+        # setting and the code behind the paper's statement that target statistics involve no target labels.
         sc_tgt = StandardScaler().fit(Xall_t.reshape(-1, Xall_t.shape[2]))
         Xte, yte, _ = concat_cells(tgt, te_bids)
         r_zero = eval_model(model, std_with(sc_tgt, Xte), yte, device)
         Xft, yft, _ = concat_cells(tgt, ft_bids)
         ft_model = new_model(args.model, Xtr.shape[2]).to(device)
         ft_model.load_state_dict(model.state_dict())
-        # 微调 lr=3e-4，比源域小一个量级：几颗电芯撑不起大步长的更新
+        # fine-tuning lr=3e-4, an order below the source: a few cells cannot support large steps
         ft_model = fit_model(ft_model, std_with(sc_tgt, Xft), yft,
                              args.ft_epochs, args.seed, device, lr=3e-4)
         r_ft = eval_model(ft_model, std_with(sc_tgt, Xte), yte, device)
-        set_seed(args.seed)  # target-only 从随机初始化训起，同样先定随机源
+        set_seed(args.seed)  # target-only starts from random init; fix the seed first as well
         to_model = new_model(args.model, Xtr.shape[2]).to(device)
         to_model = fit_model(to_model, std_with(sc_tgt, Xft), yft,
                              args.ft_epochs, args.seed, device, lr=1e-3)

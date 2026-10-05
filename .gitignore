@@ -2,11 +2,14 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+
 data/raw/
+
 *.pt
-gpuhub_cred.txt
 *.zip
 repo_v*.zip
 *.docx
-中文*
-审查*
+
+*cred*
+.env
+credentials*

@@ -3,13 +3,15 @@
 Code and derived results accompanying the manuscript:
 
 > **Conformal coverage failure and target-domain recalibration in cross-chemistry state-of-health
-> prediction of lithium-ion batteries** — Wangxing Yang (School of Automation, Beijing University
-> of Posts and Telecommunications), submitted to *Journal of Energy Storage*.
+> prediction of lithium-ion batteries**, Wangxing Yang (School of Automation, Beijing University
+> of Posts and Telecommunications), to be submitted to *Journal of Energy Storage*.
 
-This release (v1.0.0) contains everything needed to reproduce the numerical results of the
+This release (v1.0.1) contains everything needed to reproduce the numerical results of the
 manuscript: source-domain baselines, cross-chemistry transfer, split-conformal calibration, the
 supplementary experiments of Appendix E (alpha sweep, uncertainty baselines, paired statistics,
-backbone cost, window/horizon sensitivity), and the paper figures.
+backbone cost, window/horizon sensitivity), and the paper figures. Compared with v1.0.0 it adds
+Figure C.1 (the feature-richness ablation of Appendix C) and syncs the submission-revision tables
+and data documentation.
 
 ## Repository structure
 
@@ -22,7 +24,7 @@ results_cx2/          per-seed raw results of the main experiments (JSON/JSONL)
 results_p0/           Appendix E results: CSVs, per-seed NPZ, appendixE_tables.json
 configs_p0/           YAML configurations of the Appendix E experiments
 logs_p0/              run logs of the Appendix E experiments
-figures/              Figure 1-6 (PNG/PDF/EPS) and the graphical abstract
+figures/              Figure 1-6 and Figure C.1 (PNG/PDF/EPS) and the graphical abstract
 data/                 modeling tables (compressed); raw third-party data are NOT redistributed
 figures_reproduce/    figure-generation scripts of the main experiments
 ```
@@ -60,7 +62,7 @@ Appendix E.3 for the cost on an NVIDIA RTX 4060 Laptop GPU, CUDA 12.8, PyTorch 2
 
 ## Citation
 
-See `CITATION.cff`. Archived on Zenodo: [10.5281/zenodo.23159359](https://doi.org/10.5281/zenodo.23159359).
+See `CITATION.cff`. Archived on Zenodo: [10.5281/zenodo.23159358](https://doi.org/10.5281/zenodo.23159358) (concept DOI, always resolving to the latest version).
 
 ## Contact
 

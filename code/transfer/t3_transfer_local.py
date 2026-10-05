@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
-"""T3 跨化学体系迁移主实验：MIT(LFP 源域) → CALCE / NASA(LCO 目标域)。
+"""T3 cross-chemistry transfer main experiment: MIT (LFP source) -> CALCE / NASA (LCO targets).
 
-三种机制对照（论文表 3 的数据源）：
-  zero-shot   源域模型直接上目标域，预期崩，崩法是论文贡献之一
-  fine-tune   加载源域权重、小学习率微调，本方法
-  target-only 同量目标域数据从头训练，回答"迁移到底值不值"
+Three mechanisms compared (data behind Table 3):
+  zero-shot   source model straight onto the target domain; expected to collapse, and how it collapses is one of the paper's findings
+  fine-tune   load source weights, fine-tune at a small learning rate (the proposed method)
+  target-only train from scratch on the same target data, answering "is transfer worth it at all"
 
-任务口径 --task：soh 为主口径（每个循环都有 SOH 标签，样本多）；
-rul 只统计到达 EOL 的电芯（NASA 只有部分电芯观测到 EOL），样本少、仅辅助对照。
-本脚本沿用源域统计量标准化（"原始协议"），目标域统计量标准化的对照见 t3b_std_local.py。
+Task scope --task: soh is the primary scope (every cycle carries an SOH label, so samples abound);
+rul counts only cells that reached EOL (only part of the NASA cells do), giving few samples; used as a secondary control.
+This script standardises with source-domain statistics (the original protocol); see t3b_std_local.py for per-dataset standardization.
 
-运行：python t3_transfer_local.py --model tcn --task soh --seed 42
-论文口径：种子 42~46 各跑一次，报 5 种子均值±标准差。
-输出：results/transfer/t3_<task>_<model>_s<seed>.json"""
+Run: python t3_transfer_local.py --model tcn --task soh --seed 42
+Manuscript scope: one run per seed 42-46, reported as 5-seed mean+/-std.
+Output: results/transfer/t3_<task>_<model>_s<seed>.json"""
 import argparse, json, os, random, time
 import numpy as np
 import pandas as pd
@@ -22,26 +22,26 @@ from sklearn.preprocessing import StandardScaler
 
 FEATS = ["capacity_Ah", "soh", "discharge_dur_s", "v_mean_V", "v_min_V",
          "ica_peak", "ica_peak_V", "charge_dur_s"]
-# soh 任务必须剔除 soh：标签列进输入等于把答案喂给模型（2026-10-03 泄漏修复）。
-# rul 任务保留 soh：当前健康状态是 RUL 预测的合法输入，与 t2 基线口径一致。
+# the soh task must drop soh: a label in the inputs hands the answer to the model (2026-10-03 leak fix).
+# the rul task keeps soh: current health is a legitimate input for RUL prediction, matching the t2 baseline scope.
 FEATS_SOH = [c for c in FEATS if c != "soh"]
 WINDOW = 20
-# soh 任务的超前步长：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前预测）。
-# 寿命末端不足 H 步、或窗口到标签之间循环号不连续的窗口丢弃。
+# horizon of the soh task: label = soh at H cycles after the last row of the window (H-step-ahead prediction).
+# Windows closer than H steps to the record end, or with cycle gaps between window and label, are dropped.
 H = 10
-# 建模表路径（数据放 data/ 下即可，合并方法见 code/README.md）
-DATA = "data/建模表_v3.csv"
+# modeling-table path (data goes under data/; merge procedure in code/README.md)
+DATA = "data/modeling_table_v3.csv"
 
 def set_seed(seed):
-    """固定随机源。GPU 卷积本身仍非确定性，同种子重跑的指标会有小幅浮动，
-    这正是"同一配置重复运行 RMSE 波动可达 14%"（论文 4.8）的主要来源。"""
+    """Fix the random sources. GPU convolution remains nondeterministic, so same-seed reruns move a
+    little; this is the main source of the up-to-14% RMSE spread of repeated runs (Section 4.8)."""
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
 def build_windows_ds(df, dataset, task, window=WINDOW, horizon=H):
-    """按数据集切滑窗。task=soh：y=窗口末行后第 horizon 个循环的 SOH（超前预测）；
-    task=rul：y=RUL，只保留观测到 EOL 的电芯（其余电芯没有寿命终点，RUL 标签
-    无定义），且剔除负 RUL（电芯超过 EOL 后仍在测试的行，标签无物理意义）。"""
+    """Window the series per dataset. task=soh: y = SOH at the horizon-th cycle after the window end (ahead prediction);
+    task=rul: y = RUL, keeping only cells with observed EOL (the others have no life end, so the RUL label is
+    undefined), and dropping negative RUL (rows past EOL still under test, labels without physical meaning)."""
     cells = {}
     sub = df[df["dataset"] == dataset]
     ycol = "soh" if task == "soh" else "rul"
@@ -70,8 +70,8 @@ def build_windows_ds(df, dataset, task, window=WINDOW, horizon=H):
     return cells
 
 class CausalBlock(nn.Module):
-    """膨胀因果卷积残差块（与 t2_train_local 完全同构。各脚本刻意自包含，
-    单独拷一个文件也能跑，代价是这几段代码在多个脚本里重复）。"""
+    """Dilated causal convolution residual block (identical to t2_train_local. Scripts are deliberately
+    self-contained so a single file runs on its own; the cost is this duplicated block in several scripts)."""
     def __init__(self, in_ch, out_ch, k, dil):
         super().__init__()
         self.pad = (k - 1) * dil
@@ -161,44 +161,44 @@ def main():
     ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--ft-epochs", type=int, default=60)
     ap.add_argument("--horizon", type=int, default=H,
-                    help="soh 任务的超前步长（rul 任务不用）")
+                    help="horizon of the soh task (unused for rul)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default="results/transfer")
-    ap.add_argument("--data", default=DATA, help="建模表 csv 路径")
+    ap.add_argument("--data", default=DATA, help="modeling-table csv path")
     args = ap.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"T3v2 device={device} model={args.model} task={args.task}", flush=True)
     df = pd.read_csv(args.data)
     src = build_windows_ds(df, "MIT", args.task, horizon=args.horizon)
     src_bids = sorted(src)
-    # 源域内部切 90/10 训练/验证：种子只喂给 random.Random，划分跨运行可复现
+    # inside-source 90/10 train/validation split; the seed only feeds random.Random, so the split is reproducible across runs
     random.Random(args.seed).shuffle(src_bids)
     n_va = max(1, int(len(src_bids) * 0.1))
     Xtr, ytr, _ = concat_cells(src, src_bids[:-n_va])
     Xva, yva, _ = concat_cells(src, src_bids[-n_va:])
-    # 源域 scaler。注意本脚本的目标域也用这个 scaler 标准化（"原始协议"）。
-    # CALCE/NASA 特征量纲与 MIT 不同，这正是 zero-shot 崩到 0.1+ 量级的主要原因之一；
-    # 逐数据集标准化的对照见 t3b_std_local.py，两者合起来 = 论文的漂移分解。
+    # source-domain scaler. Note the target domain is standardised with this scaler too (the original protocol).
+    # CALCE/NASA features have different scales than MIT, one main reason zero-shot collapses to 0.1+;
+    # the per-dataset counterpart is t3b_std_local.py, and the two together are the paper's drift decomposition.
     sc = StandardScaler().fit(Xtr.reshape(-1, Xtr.shape[2]))
     Xtr = ((Xtr - sc.mean_) / (sc.scale_ + 1e-8)).astype(np.float32)
     Xva = ((Xva - sc.mean_) / (sc.scale_ + 1e-8)).astype(np.float32)
-    print(f"源域 MIT: 训练电芯 {len(src_bids)-n_va}, 窗口 {len(Xtr)}", flush=True)
-    set_seed(args.seed)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    print(f"source MIT: train cells {len(src_bids)-n_va}, windows {len(Xtr)}", flush=True)
+    set_seed(args.seed)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model = new_model(args.model, Xtr.shape[2]).to(device)
     t0 = time.time()
     model = fit_model(model, Xtr, ytr, args.epochs, args.seed, device, Xva, yva)
-    print(f"源域训练完成 {time.time()-t0:.0f}s", flush=True)
+    print(f"source-domain training done in {time.time()-t0:.0f}s", flush=True)
 
     results = {"model": args.model, "task": args.task, "seed": args.seed,
                "horizon": args.horizon, "targets": {}}
-    # soh 口径：CALCE 16 颗对半分微调/测试（8/8）；NASA 4 颗取 2 颗微调（2/2）。
-    # rul 口径只有 NASA 支持且固定 1 颗微调（样本太少，不做自动划分）。
+    # soh scope: CALCE 16 cells split evenly into fine-tune/test (8/8); NASA uses 2 of 4 cells for fine-tuning (2/2).
+    # the rul scope exists only for NASA and fixes 1 fine-tuning cell (too few samples for an automatic split).
     targets = [("CALCE", None), ("NASA", None)] if args.task == "soh" else [("NASA", 1)]
     for tgt_name, n_ft_fixed in targets:
         tgt = build_windows_ds(df, tgt_name, args.task, horizon=args.horizon)
         tb = sorted(tgt)
         if len(tb) < 2:
-            print(f"[{tgt_name}] 有效电芯不足({len(tb)}), 跳过", flush=True)
+            print(f"[{tgt_name}] too few valid cells ({len(tb)}), skipped", flush=True)
             continue
         n_ft = n_ft_fixed if n_ft_fixed else max(1, len(tb) // 2)
         random.Random(args.seed).shuffle(tb)
@@ -210,13 +210,13 @@ def main():
         Xft = ((Xft - sc.mean_) / (sc.scale_ + 1e-8)).astype(np.float32)
         ft_model = new_model(args.model, Xtr.shape[2]).to(device)
         ft_model.load_state_dict(model.state_dict())
-        # 微调学习率 3e-4 = 源域预训练(1e-3)的 1/3 量级：目标域只有几颗电芯，
-        # 大学习率会把源域学到的退化知识冲掉，等于白白扔掉预训练
+        # fine-tuning lr 3e-4, an order below source pre-training (1e-3): a few target cells cannot support large steps,
+        # which would wash out the degradation knowledge learned on the source domain
         ft_model = fit_model(ft_model, Xft, yft, args.ft_epochs, args.seed, device, lr=3e-4)
         r_ft = eval_model(ft_model, Xte, yte, device)
-        # target-only 对照：同样的数据、同样的轮数，但从零初始化、全量学习率。
-        # "预训练有没有用"只有跟它比才知道（这就是表 3 的"目标域基线"列）
-        set_seed(args.seed)  # 同上：随机初始化受控
+        # target-only control: same data, same epochs, but from scratch at the full learning rate.
+        # "does pre-training help" is only answerable against it (this is the target-only column of Table 3)
+        set_seed(args.seed)  # as above: random initialisation under control
         to_model = new_model(args.model, Xtr.shape[2]).to(device)
         to_model = fit_model(to_model, Xft, yft, args.ft_epochs, args.seed, device, lr=1e-3)
         r_to = eval_model(to_model, Xte, yte, device)

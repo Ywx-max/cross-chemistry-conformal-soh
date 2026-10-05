@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
-"""T4c-Weighted：协变量偏移下的加权保形（Tibshirani et al., 2019；论文 4.5 第二个扩展对照）。
+"""T4c-Weighted: weighted conformal under covariate shift (Tibshirani et al., 2019; second Section 4.5 extension).
 
-按"这块校准数据有多像测试块"加权后计算分位数。密度比 w(x)=p_test(x)/p_cal(x)
-在目标域内部的校准块与测试块之间估计（不是源域 vs 目标域），x 取块均值的模型
-预测 SOH：部署时测试块只有预测值、没有真值，权重只能使用预测侧协变量，不得
-引入测试真值（否则构成标签泄漏）。
+Quantiles are computed after weighting each calibration block by "how test-like" it is. The density ratio
+w(x)=p_test(x)/p_cal(x) is estimated between calibration and test blocks inside the target domain (not source vs
+target), with x the block-mean predicted SOH: at deployment a test block has only predictions, no labels, so the
+weights may use prediction-side covariates only and must not touch test labels (that would be label leakage).
 
-结果：NASA 上校准块与测试块的预测 SOH 分布几乎重合，权重归一化后退化为均匀
-权重，与单一分位数几乎一致；CALCE 上宽度收窄但覆盖率同步下降。小校准集下的
-条件化收窄以覆盖换宽度，相关讨论见论文 4.9 节。
+Result: on NASA the predicted-SOH distributions of calibration and test blocks nearly coincide, so the normalised
+weights degenerate to uniform and match the single quantile; on CALCE width narrows but coverage falls in step. Under
+small calibration sets, conditional narrowing trades coverage for width; see Section 4.9.
 
-运行：python t4c_weighted_local.py --seed 42（可选 --src-cache <dir> 复用源模型缓存）
-输出：results/conformal/t4c_weighted_s<seed>.json"""
+Run: python t4c_weighted_local.py --seed 42 (optional --src-cache <dir> to reuse cached source models)
+Output: results/conformal/t4c_weighted_s<seed>.json"""
 import argparse, json, os, random, time
 import numpy as np, pandas as pd, torch, torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 OUT = "results/conformal"
-# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
-# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+# soh must be dropped: it is the label of the SOH task, and a label in the inputs hands the answer to the model
+# (before the 2026-10-03 fix an identity-copy baseline scored RMSE=0, the leak in plain sight).
 FEATS=['capacity_Ah','discharge_dur_s','v_mean_V','v_min_V','ica_peak','ica_peak_V']
-# H=10：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前预测）
-W=20; DATA="data/建模表_v3.csv"; ALPHA=0.10; NB=3; H=10
+# H=10: label = soh at H cycles after the last row of the window (H-step-ahead prediction)
+W=20; DATA="data/modeling_table_v3.csv"; ALPHA=0.10; NB=3; H=10
 
 def set_seed(s):
     random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
@@ -87,24 +87,24 @@ def cc(cells,bids):
     X=np.concatenate([cells[b][0] for b in bids]); y=np.concatenate([cells[b][1] for b in bids])
     return X,y
 def cq(res,a):
-    # 单一分位数基线（与 t4_conformal.conformal_q 同式），给 weighted 当对照
+    # single-quantile baseline (same formula as t4_conformal.conformal_q), the control for weighted
     n=len(res); idx=min(n-1,int(np.ceil((n+1)*(1-a)))-1)
     return float(np.sort(res)[idx])
 def chunk_mean(arr, w=20):
     n=len(arr)//w
     return np.array([np.mean(arr[i*w:(i+1)*w]) for i in range(n)])
 def gaussian_w(cal_soh, te_soh):
-    # 密度比 w(x) = p_target(x) / p_cal(x)，x 取块均值 SOH，两个分布各用
-    # 高斯近似。末尾除以均值做归一化：让权重只表达"相对重要性"，量级稳定
-    # （+1e-8 防 std=0；NASA 校准块少、SOH 几乎恒定时真的会触发）
+    # density ratio w(x) = p_target(x) / p_cal(x) with x the block-mean SOH, both distributions
+    # Gaussian. Dividing by the mean at the end normalises the weights so they express relative importance only and stay stable
+    # (+1e-8 guards std=0, which really happens when NASA has few calibration blocks at nearly constant SOH)
     mu_s,std_s=np.mean(cal_soh),np.std(cal_soh)+1e-8
     mu_t,std_t=np.mean(te_soh),np.std(te_soh)+1e-8
     w=(std_s/std_t)*np.exp(-0.5*((cal_soh-mu_t)/std_t)**2+0.5*((cal_soh-mu_s)/std_s)**2)
     return w/np.mean(w)
 def weighted_cq(res,wts,a):
-    # 加权分位数：按残差升序累加权重，取累计权重首次达到 (1-alpha)·(n+1)/n·总权重
-    # 处的残差。阈值含 (n+1)/n 因子，均匀权重下退化为 ceil((n+1)(1-alpha))
-    # 次序统计量，与 cq() 同口径。
+    # weighted quantile: accumulate weights over residuals in ascending order and take the residual where the
+    # cumulative weight first reaches (1-alpha)*(n+1)/n * total weight. The (n+1)/n factor makes uniform weights
+    # degenerate to the ceil((n+1)(1-alpha)) order statistic, the same scope as cq().
     order=np.argsort(res); sr=res[order]; sw2=wts[order]
     cw=np.cumsum(sw2); tw=cw[-1]
     n=len(res)
@@ -116,12 +116,12 @@ def weighted_cq(res,wts,a):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--data", default=DATA, help="建模表 csv 路径")
-    ap.add_argument("--out", default="results/conformal", help="结果输出目录")
+    ap.add_argument("--data", default=DATA, help="modeling-table csv path")
+    ap.add_argument("--out", default="results/conformal", help="results output directory")
     ap.add_argument("--src-cache", default=None,
-                    help="统一源模型缓存目录；命中则跳过源域预训练")
+                    help="unified source-model cache directory; a hit skips source pre-training")
     ap.add_argument("--horizon", type=int, default=H,
-                    help="超前步长：标签 = 窗口末行后第 H 个循环的 soh")
+                    help="horizon: label = soh at H cycles after the last window row")
     args = ap.parse_args()
     SEED = args.seed
     OUT = args.out
@@ -131,7 +131,7 @@ def main():
     sb=sorted(src); random.Random(SEED).shuffle(sb)
     nv=max(1,int(len(sb)*0.1)); Xtr,ytr=cc(src,sb[:-nv]); Xva,yva=cc(src,sb[-nv:])
     sc=StandardScaler().fit(Xtr.reshape(-1,Xtr.shape[2]))
-    set_seed(SEED)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    set_seed(SEED)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model=TCN(Xtr.shape[2]).to(device)
     cache_p = None
     if args.src_cache:
@@ -149,13 +149,13 @@ def main():
         if args.src_cache:
             _save=os.path.join(args.src_cache,'src_tcn_s%d_ep120_h%d.pt' % (SEED, args.horizon))
             torch.save(model.state_dict(), _save)
-            print('[cache] 源模型已写入 %s' % _save, flush=True)
+            print('[cache] source model written to %s' % _save, flush=True)
     results={'horizon':args.horizon,'targets':{}}
     for tg in ['CALCE','NASA']:
         tgt=build_windows(df[df['dataset']==tg], H=args.horizon)
         tbg=sorted(tgt); random.Random(SEED).shuffle(tbg)
-        # 与 t4c_mondrian 完全相同的三分协议（CALCE 2/2/4、NASA 1/1/2），
-        # 两个扩展对照之间才可比
+        # exactly the same third-split protocol as t4c_mondrian (CALCE 2/2/4, NASA 1/1/2),
+        # so the two extension controls are comparable
         nf=max(1,len(tbg)//3)
         ft_b,cal_b,te_b=tbg[:nf],tbg[nf:nf*2],tbg[nf*2:]
         Xa,ya=cc(tgt,tbg); sct=StandardScaler().fit(Xa.reshape(-1,Xa.shape[2]))
@@ -170,11 +170,11 @@ def main():
         Xte,yte=cc(tgt,te_b); pte=pred(ftm,sw(sct,Xte),device)
         te_res=np.abs(pte-yte)
         te_res_c=chunk_mean(te_res,W); n_t=len(te_res_c)
-        # 权重用的测试侧"SOH"取模型预测的块均值（部署时可得），不用测试真值：
-        # 密度比在目标域内部的校准块与测试块之间估计，属于直推式设定
+        # the test-side "SOH" used by the weights is the block mean of model predictions (available at deployment), never test labels:
+        # the density ratio is estimated between calibration and test blocks inside the target domain (a transductive setting)
         te_pred_c=chunk_mean(pte,W)
         picp_single=float(np.mean(te_res_c<=q_single)); mpiw_single=2*q_single
-        # 权重只喂给校准块；测试块不需要权重（覆盖评估就是普通的"落在区间内吗"）
+        # weights apply to calibration blocks only; test blocks need none (coverage evaluation is just "did it fall inside the interval")
         w=gaussian_w(cal_soh_c, te_pred_c)
         q_weighted=weighted_cq(cres_c, w, ALPHA)
         picp_weighted=float(np.mean(te_res_c<=q_weighted)); mpiw_weighted=2*q_weighted

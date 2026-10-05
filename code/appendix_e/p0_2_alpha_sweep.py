@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
-"""P0-2: 区间指标与 alpha 扫描（Winkler / pinball / NMPIW / PICP / MPIW）。
+"""P0-2: interval metrics and alpha sweep (Winkler / pinball / NMPIW / PICP / MPIW).
 
-协议复现：逐字复制开源仓库 v1.2.4 (b6c3e39) code/conformal/t4_conformal_local.py 的
-数据管线 / 模型 / 训练 / 划分逻辑（build_windows_ds, TCN, RNNWrap, fit_model, predict,
-std_with, concat_cells, conformal_q, set_seed），仅增加：
-  1) 测试窗口的 y_pred/y_true 落盘（npz），供 reliability diagram 与 Fig.6 复用；
-  2) alpha ∈ {0.05, 0.10, 0.20} 扫描（校准分位数按 conformal_q 重算）；
-  3) Winkler / pinball(tau=alpha/2,1-alpha/2) / NMPIW 指标（target 与 source 两路由）。
-alpha=0.10 的 PICP/MPIW 与论文表 5 对照（同协议重算，训练非确定性致 0.2% 级漂移，
-与 zeroshot_route.py 先例同口径）。
+Protocol reproduction: verbatim copy of the data pipeline / model / training / splitting logic of
+code/conformal/t4_conformal_local.py at v1.2.4 (b6c3e39) (build_windows_ds, TCN, RNNWrap, fit_model, predict,
+std_with, concat_cells, conformal_q, set_seed), adding only:
+  1) y_pred/y_true of the test windows dumped to npz for the reliability diagram and Fig. 6;
+  2) an alpha in {0.05, 0.10, 0.20} sweep (calibration quantiles recomputed with conformal_q);
+  3) Winkler / pinball(tau=alpha/2, 1-alpha/2) / NMPIW metrics for both routes.
+PICP/MPIW at alpha=0.10 are compared against Table 5 (same-protocol recomputation; training nondeterminism
+causes drift at the 0.2% level, the same scope as the zeroshot_route.py precedent).
 
-数据（版本隔离）：data/建模表_v3_cx2.csv；源模型缓存 results_cx2/src_cache（不重训源域）。
-输出：results/p0_2_metrics.csv、results/p0_2_raw/<model>_s<seed>.npz、logs/p0_2.log
-运行：python p0_2_alpha_sweep.py（开源仓库根目录为 cwd）
+Data (version isolation): data/modeling_table_v3_cx2.csv; source caches from results_cx2/src_cache (no source retraining).
+Output: results/p0_2_metrics.csv, results/p0_2_raw/<model>_s<seed>.npz, logs/p0_2.log
+Run: python p0_2_alpha_sweep.py (cwd = repository root)
 """
 import csv, io, json, os, random, sys, time
 
@@ -23,10 +23,10 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-# ---------- 版本隔离路径 ----------
+# version-isolated paths
 OSS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 P0 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA = os.path.join(OSS, "data", "建模表_v3_cx2.csv")
+DATA = os.path.join(OSS, "data", "modeling_table_v3_cx2.csv")
 SRC_CACHE = os.path.join(OSS, "results_cx2", "src_cache")
 OUT_RES = os.path.join(P0, "results_p0")
 OUT_RAW = os.path.join(P0, "results_p0", "p0_2_raw")
@@ -40,7 +40,7 @@ def log(msg):
     LOG.write(msg + "\n")
     LOG.flush()
 
-# ========== 以下函数逐字复制自 code/conformal/t4_conformal_local.py (v1.2.4 b6c3e39) ==========
+# Functions below copied verbatim from code/conformal/t4_conformal_local.py (v1.2.4 b6c3e39).
 FEATS = ["capacity_Ah", "discharge_dur_s", "v_mean_V", "v_min_V",
          "ica_peak", "ica_peak_V"]
 WINDOW = 20
@@ -158,7 +158,7 @@ def conformal_q(residuals, alpha=ALPHA):
     n = len(residuals)
     idx = min(n - 1, int(np.ceil((n + 1) * (1 - alpha))) - 1)
     return float(np.sort(residuals)[idx])
-# ========== 复制结束 ==========
+# End of copied section.
 
 ALPHAS = [0.05, 0.10, 0.20]
 
@@ -168,13 +168,13 @@ def metrics(y, pred, q, alpha):
     picp = float(np.mean(r <= q))
     mpiw = 2.0 * q
     nmpiw = mpiw / float(np.mean(np.abs(y)))
-    # Winkler：区间 [pred-q, pred+q]，超界罚 2/alpha 倍宽度
+    # Winkler: interval [pred-q, pred+q], with 2/alpha times the width penalising violations
     viol = np.maximum(r - q, 0.0)
     winkler = float(np.mean(2 * q + (2.0 / alpha) * viol))
-    # pinball：lower tau=alpha/2、upper tau=1-alpha/2 的平均分位数损失
+    # pinball: mean quantile loss of the lower (tau=alpha/2) and upper (tau=1-alpha/2) quantiles
     tau_l, tau_u = alpha / 2.0, 1 - alpha / 2.0
-    rl = y - (pred - q)   # 下分位数残差
-    ru = y - (pred + q)   # 上分位数残差
+    rl = y - (pred - q)   # lower-quantile residual
+    ru = y - (pred + q)   # upper-quantile residual
     pl = np.maximum(tau_l * rl, (tau_l - 1) * rl)
     pu = np.maximum(tau_u * ru, (tau_u - 1) * ru)
     pinball = float(0.5 * (np.mean(pl) + np.mean(pu)))
@@ -203,7 +203,7 @@ def main():
             cache_p = os.path.join(SRC_CACHE, f"src_{model}_s{seed}_ep120_h10.pt")
             if os.path.exists(cache_p):
                 model_nn.load_state_dict(torch.load(cache_p, map_location=device, weights_only=True))
-            else:  # 源缓存未随仓库分发：现场按 Section 3.2 协议重建
+            else:  # source caches are not distributed: rebuild on the spot under the Section 3.2 protocol
                 log(f"[cache] miss {cache_p}; retraining source model ...")
                 model_nn = fit_model(model_nn, Xtr_s, ytr, 120, seed, device, Xva_s, yva)
             src_cal_res = np.abs(predict(model_nn, Xva_s, device) - yva)
@@ -232,7 +232,7 @@ def main():
                 raw[f"{tgt_name}_q_src"] = q_src
                 for alpha in ALPHAS:
                     q_t = conformal_q(cal_res, alpha)
-                    q_s = conformal_q(src_cal_res, alpha)   # 源域路由：alpha 也扫描（q_src(alpha)）
+                    q_s = conformal_q(src_cal_res, alpha)   # source route: alpha is swept as well (q_src(alpha))
                     raw[f"{tgt_name}_q_tgt_a{int(alpha*100)}"] = q_t
                     raw[f"{tgt_name}_q_src_a{int(alpha*100)}"] = q_s
                     for route, q in (("target", q_t), ("source", q_s)):
@@ -250,7 +250,7 @@ def main():
     with open(os.path.join(OUT_RES, "p0_2_metrics.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader(); w.writerows(rows)
-    log(f"P0-2 全部完成 {time.time()-t_all:.0f}s，共 {len(rows)} 行 -> p0_2_metrics.csv")
+    log(f"P0-2 all done in {time.time()-t_all:.0f}s, {len(rows)} rows -> p0_2_metrics.csv")
 
 
 if __name__ == "__main__":

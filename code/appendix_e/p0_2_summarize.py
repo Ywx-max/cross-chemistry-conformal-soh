@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P0-2 汇总：α 扫描透视表 + 与论文表 5 原值的漂移对照（alpha=0.10, target 路由）。"""
+"""P0-2 summary: alpha-sweep pivot table + drift comparison against the original Table 5 values (alpha=0.10, target route)."""
 import io, json, os, sys, csv
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -13,8 +13,8 @@ for r in rows:
     r["alpha"] = float(r["alpha"]); r["PICP"] = float(r["PICP"]); r["MPIW"] = float(r["MPIW"])
     r["NMPIW"] = float(r["NMPIW"]); r["Winkler"] = float(r["Winkler"]); r["pinball"] = float(r["pinball"])
 
-# ---- 1. 与表 5 原值对照（alpha=0.10, target 路由） ----
-print("=== alpha=0.10 target 路由：重算 vs 论文表 5 原值（逐种子） ===")
+# 1. comparison against the original Table 5 values (alpha=0.10, target route)
+print("=== alpha=0.10 target route: recomputation vs original Table 5 values (per seed) ===")
 drifts = []
 for model in ("tcn", "lstm"):
     for domain in ("CALCE", "NASA"):
@@ -23,15 +23,15 @@ for model in ("tcn", "lstm"):
         orig = [j["targets"][domain]["target_calibrated"]["PICP"] for j in j5]
         re5 = [r["PICP"] for r in rows if r["model"] == model and r["domain"] == domain
                and r["route"] == "target" and r["alpha"] == 0.10]
-        re5_sorted = sorted(re5)  # 种子顺序即 42..46
+        re5_sorted = sorted(re5)  # seed order is 42..46
         d = [a - b for a, b in zip(re5_sorted, orig)]
         drifts += [abs(x) for x in d]
-        print(f"  {model}/{domain}: 重算={['%.3f' % x for x in re5_sorted]}  原值={['%.3f' % x for x in orig]}  "
+        print(f"  {model}/{domain}: recomputed={['%.3f' % x for x in re5_sorted]}  original={['%.3f' % x for x in orig]}  "
               f"max|Δ|={max(abs(x) for x in d):.3f}")
-print(f"全部 20 组 max|Δ| = {max(drifts):.3f}（训练非确定性漂移）")
+print(f"all 20 configurations max|delta| = {max(drifts):.3f} (training-nondeterminism drift)")
 
-# ---- 2. alpha 扫描汇总（target 路由） ----
-print("\n=== alpha 扫描（target 路由，5 种子均值±std） ===")
+# 2. alpha-sweep summary (target route)
+print("\n=== alpha sweep (target route, 5-seed mean+/-std) ===")
 hdr = f"{'model/domain':14s} {'alpha':>5s} {'PICP':>14s} {'NMPIW':>14s} {'Winkler':>10s} {'pinball':>9s}"
 print(hdr)
 agg_rows = []
@@ -57,17 +57,17 @@ for model in ("tcn", "lstm"):
 with open(os.path.join(P0, "results_p0", "p0_2_alpha_summary.csv"), "w", newline="", encoding="utf-8") as f:
     w = csv.DictWriter(f, fieldnames=list(agg_rows[0].keys()))
     w.writeheader(); w.writerows(agg_rows)
-print("\n已写 p0_2_alpha_summary.csv")
+print("\nwrote p0_2_alpha_summary.csv")
 
-# source 路由 alpha=0.10 对照（20/20 欠覆盖复核）
-print("\n=== source 路由 alpha=0.10（欠覆盖复核，应全部 <0.90） ===")
+# source route at alpha=0.10 (under-coverage recheck)
+print("\n=== source route alpha=0.10 (under-coverage recheck, all must be <0.90) ===")
 bad = 0
 for model in ("tcn", "lstm"):
     for domain in ("CALCE", "NASA"):
         sel = [r["PICP"] for r in rows if r["model"] == model and r["domain"] == domain
                and r["route"] == "source" and r["alpha"] == 0.10]
         m = float(np.mean(sel))
-        flag = "OK" if m < 0.90 else "!! 违反"
+        flag = "OK" if m < 0.90 else "VIOLATION"
         bad += (m >= 0.90)
         print(f"  {model}/{domain}: {m:.3f}  {flag}")
-print(f"欠覆盖复核：{20 - bad}/20 组 <0.90")
+print(f"under-coverage recheck: {20 - bad}/20 below 0.90")

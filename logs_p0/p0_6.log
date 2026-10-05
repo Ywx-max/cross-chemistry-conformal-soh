@@ -49,9 +49,9 @@ P0-6 device=cuda
 [B H20 s45] 308s {'CALCE': (0.11840706318616867, 0.15386144816875458), 'NASA': (0.025115149095654488, 0.1158822700381279)}
   [B/H20/s46] src trained 109s
 [B H20 s46] 195s {'CALCE': (0.13275699317455292, 0.16143734753131866), 'NASA': (0.020797591656446457, 0.1251809298992157)}
-P0-6 完成 3357s，共 50 行 -> p0_6_wh_sensitivity.csv
+P0-6 done in 3357s, 50 rows -> p0_6_wh_sensitivity.csv
 
-=== 汇总（5 种子均值±std ft_rmse） ===
+=== summary (5-seed mean+/-std ft_rmse) ===
   tcn W=10 H=10 CALCE  ft 0.1024±0.0209
   tcn W=10 H=10 NASA   ft 0.0298±0.0080
   tcn W=30 H=10 CALCE  ft 0.1056±0.0174

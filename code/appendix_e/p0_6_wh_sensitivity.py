@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""P0-6: W/H 敏感性（TCN + LSTM）。
-Part A：窗口敏感性 W ∈ {10, 30, 40}（W = 20 基线已在主表），TCN，H = 10，seeds 42-46，
-        两目标域——源模型按 W 重训（协议同 Section 3.2，缓存 p0_6_src_cache）。
-Part B：步长敏感性补 LSTM：H ∈ {5, 20}（H = 10 基线在主表，TCN 的 H5/H20 已有
-        transfer_sens_h5/h20），LSTM，W = 20，seeds 42-46，两目标域。
-输出：results/p0_6_wh_sensitivity.csv（ft_rmse / zero_rmse 逐种子）；logs/p0_6.log
-运行：python p0_6_wh_sensitivity.py（cwd = 开源仓库根目录）
+"""P0-6: W/H sensitivity (TCN + LSTM).
+Part A: window sensitivity W in {10, 30, 40} (W = 20 is the main-table baseline), TCN, H = 10, seeds 42-46,
+        both target domains - source models retrained per W (protocol as in Section 3.2, cache p0_6_src_cache).
+Part B: horizon sensitivity for the LSTM: H in {5, 20} (H = 10 is the main-table baseline; TCN H5/H20 already
+        exist as transfer_sens_h5/h20), LSTM, W = 20, seeds 42-46, both target domains.
+Output: results/p0_6_wh_sensitivity.csv (per-seed ft_rmse / zero_rmse); logs/p0_6.log
+Run: python p0_6_wh_sensitivity.py (cwd = repository root)
 """
 import csv, io, os, sys, time
 
@@ -30,7 +30,7 @@ def log(m):
 
 
 def run_config(df, model, W, H, seed, device, tag):
-    """单配置：源模型（按 W/H 缓存）+ 微调 + 测试；返回逐域 (ft_rmse, zero_rmse)。"""
+    """One configuration: source model (cached per W/H) + fine-tuning + test; returns per-domain (ft_rmse, zero_rmse)."""
     out = {}
     cache_p = os.path.join(SRC6, f"src_{model}_w{W}_s{seed}_ep120_h{H}.pt")
     src = build_windows_ds(df, "MIT", window=W, horizon=H)
@@ -63,11 +63,11 @@ def run_config(df, model, W, H, seed, device, tag):
         ft_b, te_b = tb[:n_ft], tb[n_ft:]
         Xall_t, _, _ = concat_cells(tgt, tb)
         sc_tgt = StandardScaler().fit(Xall_t.reshape(-1, Xall_t.shape[2]))
-        # 零样本
+        # zero-shot
         Xte, yte, _ = concat_cells(tgt, te_b)
         pred_zs = predict(sm, std_with(sc_tgt, Xte), device)
         zero_rmse = float(np.sqrt(np.mean((pred_zs - yte) ** 2)))
-        # 微调（迁移协议：微调/测试对半，无校准集）
+        # fine-tuning (transfer protocol: fine-tune/test halves, no calibration set)
         Xft, yft, _ = concat_cells(tgt, ft_b)
         ft = new_model(model, Xtr.shape[2]).to(device)
         ft.load_state_dict(sm.state_dict())
@@ -84,7 +84,7 @@ def main():
     df = pd.read_csv(DATA)
     rows = []
     t_all = time.time()
-    # ---- Part A: W 敏感性（TCN, H=10, W in {10,30,40}） ----
+    # Part A: W sensitivity (TCN, H=10, W in {10,30,40})
     for W in (10, 30, 40):
         for seed in (42, 43, 44, 45, 46):
             t0 = time.time()
@@ -93,7 +93,7 @@ def main():
                 rows.append(dict(part="A_window", model="tcn", W=W, H=10, seed=seed,
                                  domain=dom, ft_rmse=round(ft_r, 5), zero_rmse=round(zs_r, 5)))
             log(f"[A W{W} s{seed}] {time.time()-t0:.0f}s {out}")
-    # ---- Part B: H 补 LSTM（H in {5,20}） ----
+    # Part B: H for the LSTM (H in {5,20})
     for H in (5, 20):
         for seed in (42, 43, 44, 45, 46):
             t0 = time.time()
@@ -106,9 +106,9 @@ def main():
               encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader(); w.writerows(rows)
-    log(f"P0-6 完成 {time.time()-t_all:.0f}s，共 {len(rows)} 行 -> p0_6_wh_sensitivity.csv")
+    log(f"P0-6 done in {time.time()-t_all:.0f}s, {len(rows)} rows -> p0_6_wh_sensitivity.csv")
     import numpy as np
-    log("\n=== 汇总（5 种子均值±std ft_rmse） ===")
+    log("\n=== summary (5-seed mean+/-std ft_rmse) ===")
     for part in ("A_window", "B_horizon_lstm"):
         for model in ("tcn", "lstm"):
             for W, H in ((10, 10), (30, 10), (40, 10), (20, 5), (20, 20)):

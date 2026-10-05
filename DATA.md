@@ -12,3 +12,6 @@ Download them from their original repositories:
 The compressed modeling tables under `data/` are derived from these datasets with the parsing
 scripts in `code/data_prep/`; uncompress them with `gunzip -k data/*.gz` before running the
 pipelines.
+
+For CALCE-based prognostics context, the benchmark of He et al. (J. Power Sources 196 (2011)
+10314-10321, https://doi.org/10.1016/j.jpowsour.2011.08.040) is cited as [29] in the manuscript.

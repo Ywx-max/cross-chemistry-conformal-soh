@@ -1,31 +1,31 @@
 # -*- coding: utf-8 -*-
-"""聚合脚本：从 results/ 下的逐种子原始文件重新生成论文引用的全部多种子汇总文件。
+"""Aggregation: regenerates every multi-seed summary file cited in the manuscript from the per-seed raw files under results/.
 
-背景（2026-10）：本仓库此前发布了 10 个汇总 JSON/CSV，但没有任何脚本生成它们，
-其中 3 个还存在与逐种子文件对不上的问题（transfer_multiseed_v2.json 的 TCN 行、
-ablation_multiseed_v5.json 的 base7 行、lobo_final_multiseed.json 中 LSTM /
-Transformer / 集成的"各 2 次重复"聚合）。本脚本补齐聚合层，逐种子文件是唯一输入：
+Background (2026-10): the repository previously shipped 10 summary JSON/CSV files with no script generating
+them, and 3 of them disagreed with the per-seed files (the TCN row of transfer_multiseed_v2.json, the base7
+row of ablation_multiseed_v5.json, and the two-repeat aggregates of LSTM/Transformer/ensemble in
+lobo_final_multiseed.json). This script supplies the missing aggregation layer; the per-seed files are the only input:
 
-  baselines/baseline_3seed_final.json   <- {model}_f5_s42-44.json（5 折组 CV）
-  baselines/lobo_final_multiseed.json   <- lobo_{tcn_s42,tcn_s43,tcn_s44}.jsonl（3 次重复）
-                                           + lobo_tcn/lstm/transformer.jsonl（原运行）
-  baselines/lobo_3model_final.csv       <- 上述三个原运行 jsonl 按电芯对齐
-  transfer/transfer_multiseed_v2.json   <- t3b_{tcn,lstm}_s42-46.json（表 3）
-  transfer/raw_protocol_multiseed.json  <- t3_soh_tcn_s42-46.json（表 4 第 1 行口径）
-  ablation/ablation_multiseed.json      <- t3c_base7_tcn_s42-46.json（v3 数据版本）
-  ablation/ablation_multiseed_v5.json   <- t3d_{base7,curve14}_tcn_s42-46.json（v5）
-  ablation/ablation_v3c_multiseed.json  <- t3e_{base7,curve14}_tcn_s42-46.json（v3c，论文采用）
-  conformal/conformal_multiseed_summary.json <- t4_{tcn,lstm}_s42-46.json（表 5）
-  conformal/t4c_multiseed_summary.json  <- t4c_{mondrian,weighted}_s42-46.json（4.5 扩展）
+  baselines/baseline_3seed_final.json   <- {model}_f5_s42-44.json (5-fold group CV)
+  baselines/lobo_final_multiseed.json   <- lobo_{tcn_s42,tcn_s43,tcn_s44}.jsonl (3 repeats)
+                                           + lobo_tcn/lstm/transformer.jsonl (original runs)
+  baselines/lobo_3model_final.csv       <- the three original-run jsonl files aligned by cell
+  transfer/transfer_multiseed_v2.json   <- t3b_{tcn,lstm}_s42-46.json (Table 3)
+  transfer/raw_protocol_multiseed.json  <- t3_soh_tcn_s42-46.json (first row of Table 4)
+  ablation/ablation_multiseed.json      <- t3c_base7_tcn_s42-46.json (v3 data version)
+  ablation/ablation_multiseed_v5.json   <- t3d_{base7,curve14}_tcn_s42-46.json (v5)
+  ablation/ablation_v3c_multiseed.json  <- t3e_{base7,curve14}_tcn_s42-46.json (v3c, used in the manuscript)
+  conformal/conformal_multiseed_summary.json <- t4_{tcn,lstm}_s42-46.json (Table 5)
+  conformal/t4c_multiseed_summary.json  <- t4c_{mondrian,weighted}_s42-46.json (Section 4.5 extensions)
 
-口径说明：
-  * 全部 std 为样本标准差（ddof=1），与论文表题一致。
-  * lobo_final_multiseed.json 只保留有逐折 jsonl 支撑的运行（TCN 的 3 次重复）；
-    lstm / transformer / ensemble 的两次重复因缺少逐折原始文件，不纳入汇总。
-  * t4c_mondrian_*.json 为 2026-10 之前的原始运行（该脚本无缺陷，未重跑）；
-    t4c_weighted_*.json 为修复测试标签泄漏与加权分位数 off-by-one 后的重跑结果。
+Conventions:
+  * all std values are the sample std (ddof=1), matching the manuscript table captions.
+  * lobo_final_multiseed.json keeps only runs with per-fold jsonl support (the TCN repeats);
+    the LSTM / Transformer / ensemble repeats lack per-fold raw files and are excluded.
+  * t4c_mondrian_*.json is the original pre-2026-10 run (that script was defect-free and was not rerun);
+    t4c_weighted_*.json was rerun after fixing a test-label leak and an off-by-one in the weighted quantile.
 
-运行：python code/checks/aggregate_results.py（在仓库根目录执行）
+Run: python code/checks/aggregate_results.py (from the repository root)
 """
 import csv
 import json
@@ -35,7 +35,7 @@ import numpy as np
 
 import argparse
 
-R = "results"  # 可由 --results 覆盖（cx2 模式指向 results_cx2）
+R = "results"  # overridable via --results (cx2 mode points to results_cx2)
 
 
 def load(path):
@@ -56,7 +56,7 @@ def ms(vals):
 
 
 def agg_t3b():
-    """表 3：逐数据集标准化协议，t3b_{model}_s{seed}.json。"""
+    """Table 3: per-dataset standardization, t3b_{model}_s{seed}.json."""
     out = {}
     for model in ("tcn", "lstm"):
         for ds in ("CALCE", "NASA"):
@@ -73,7 +73,7 @@ def agg_t3b():
 
 
 def agg_t3soh():
-    """表 4 第 1 行口径：原始协议（源域统计量标准化），t3_soh_tcn_s{seed}.json。"""
+    """First row of Table 4: original protocol (source-domain statistics), t3_soh_tcn_s{seed}.json."""
     out = {}
     for ds in ("CALCE", "NASA"):
         zero, ft = [], []
@@ -87,7 +87,7 @@ def agg_t3soh():
 
 
 def agg_t3x(dirname, stem, out_name, variants):
-    """消融三兄弟（t3c/t3d/t3e）共用结构：{targets ds} x {variants 集}。"""
+    """The three ablation variants (t3c/t3d/t3e) share the structure {targets ds} x {variants}."""
     out = {}
     for variant in variants:
         for ds in ("CALCE", "NASA"):
@@ -103,14 +103,14 @@ def agg_t3x(dirname, stem, out_name, variants):
 
 
 def agg_f5():
-    """表 1：5 折组 CV，3 种子。std 为种子间样本标准差（ddof=1）。"""
+    """Table 1: 5-fold group CV, 3 seeds. Std is the sample std over seeds (ddof=1)."""
     out = {}
     for model in ("lstm", "gru", "tcn", "transformer"):
         seed_rmse, seed_mae = [], []
         for s in range(42, 45):
             d = load(f"{R}/baselines/{model}_f5_s{s}.json")
             folds = d["folds"]
-            # 每种子的 RMSE = 5 折 RMSE 的算术平均（与论文表 1 口径一致）
+            # per-seed RMSE = arithmetic mean of the 5 fold RMSEs (matching Table 1)
             seed_rmse.append(np.mean([f["rmse"] for f in folds]))
             seed_mae.append(np.mean([f["mae"] for f in folds]))
         seed_rmse, seed_mae = np.asarray(seed_rmse), np.asarray(seed_mae)
@@ -122,10 +122,10 @@ def agg_f5():
 
 
 def lobo_stats(recs):
-    """一次 LOBO 运行（jsonl）的逐电芯 RMSE 分布统计。
-    分位数取升序第 floor(q*n)+1 个值（1 基；实现用 0 基下标 floor(q*n)，与论文表 2
-    及 verify_results_cx2.py 一致；np.quantile(method="lower") 是 floor(q*(n-1))，勿用）。
-    std 为样本口径 ddof=1，与论文表 2 及模块 docstring 一致。"""
+    """Per-cell RMSE distribution statistics of one LOBO run (jsonl).
+    Quantiles use the ascending floor(q*n)+1-th value (1-based; implemented as the 0-based index
+    floor(q*n), matching Table 2 and verify_results_cx2.py; np.quantile(method="lower") is floor(q*(n-1)), do not use).
+    Std is the sample std, ddof=1, as in Table 2 and the module docstring."""
     r = np.sort(np.asarray([x["rmse"] for x in recs]))
     n = len(r)
     q = lambda p: float(r[min(int(p * n), n - 1)])
@@ -139,8 +139,8 @@ def read_jsonl(p):
 
 
 def agg_lobo():
-    """表 2 / 图 2：TCN 3 次重复 + 三骨干原运行。lstm/transformer 的
-    "各 2 次重复"聚合因逐折文件缺失而撤下（见模块 docstring）。"""
+    """Table 2 / Fig. 2: TCN 3 repeats + the other backbones' original runs. The LSTM/Transformer
+    two-repeat aggregates are withdrawn because the per-fold files are missing (see module docstring)."""
     out = {}
     run_files = sorted(glob.glob(f"{R}/baselines/lobo_tcn_s4[2-4].jsonl"))
     seeds = [int(x.split("_s")[-1].split(".")[0]) for x in run_files]
@@ -159,7 +159,7 @@ def agg_lobo():
 
 
 def agg_lobo_csv():
-    """表 2 集成行：三骨干原运行按电芯对齐（lobo_3model_final.csv 的再生成）。"""
+    """Table 2 ensemble row: the three original runs aligned by cell (regeneration of lobo_3model_final.csv)."""
     models = ("tcn", "lstm", "transformer")
     by_cell = {}
     for m in models:
@@ -177,13 +177,13 @@ def agg_lobo_csv():
         w.writeheader()
         w.writerows(rows)
     print("wrote", p)
-    # 集成（逐电芯取三模型最优，需测试真值，为不可部署的上界参照）
+    # ensemble (per-cell best of three; uses test labels, a non-deployable upper bound)
     ens = float(np.mean([min(r["rmse_tcn"], r["rmse_lstm"], r["rmse_tf"]) for r in rows]))
-    print(f"逐电芯三模型择优（oracle 上界）均值 = {ens:.2f}")
+    print(f"per-cell three-model oracle mean = {ens:.2f}")
 
 
 def agg_conformal():
-    """表 5：t4_{model}_s{seed}.json（2026-10 重跑：校准与评估同源）。"""
+    """Table 5: t4_{model}_s{seed}.json (2026-10 rerun: calibration and evaluation share the model)."""
     out = {}
     for model in ("tcn", "lstm"):
         for ds in ("CALCE", "NASA"):
@@ -204,7 +204,7 @@ def agg_conformal():
 
 
 def agg_t4c():
-    """4.5 扩展：Mondrian（原始运行）+ Weighted（修复后重跑）。"""
+    """Section 4.5 extensions: Mondrian (original run) + weighted (rerun after the fix)."""
     out = {}
     for variant in ("mondrian", "weighted"):
         out[variant] = {}
@@ -228,7 +228,7 @@ def agg_t4c():
 
 
 def agg_sweep():
-    """覆盖率-校准电芯数扫描汇总（cx2）。"""
+    """Coverage vs calibration-cell count sweep (cx2)."""
     out = {}
     for model in ("tcn", "lstm"):
         for nc in (1, 2, 3, 4, 5):
@@ -256,7 +256,7 @@ def agg_sweep():
 
 
 def agg_i9():
-    """划分重抽（50 次）的抽样分布（cx2）。"""
+    """Sampling distribution of the split redraws (50 runs, cx2)."""
     out = {}
     for model in ("tcn", "lstm"):
         pt, pw, rm = [], [], []
@@ -271,7 +271,7 @@ def agg_i9():
             rm.append(t["point_rmse"])
         v = np.asarray(pt)
         if len(v) == 0:
-            continue  # 该骨干的 i9 尚未跑完（tcn 先行，lstm 随后）
+            continue  # this backbone's i9 is not finished yet (tcn first, lstm later)
         q = lambda p: float(np.quantile(v, p))
         out[model] = {"n": len(v),
                       "picp_tgt": {"mean": float(v.mean()), "std": float(v.std(ddof=1)),
@@ -285,13 +285,13 @@ def agg_i9():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--results", default="results", help="结果根目录（cx2 模式传 results_cx2）")
+    ap.add_argument("--results", default="results", help="results root (pass results_cx2 for cx2 mode)")
     args = ap.parse_args()
     R = args.results
     agg_t3b()
     agg_t3soh()
     if R == "results":
-        # 源域产物与 v3/v5 时代消融仅属旧结果（cx2 未重跑，冻结不动）
+        # source-domain artifacts and the v3/v5-era ablations belong to the old results scope (not rerun for cx2; frozen)
         agg_t3x("ablation", "t3c", "ablation_multiseed.json", ["base7"])
         agg_t3x("ablation", "t3d", "ablation_multiseed_v5.json", ["base7", "curve14"])
         agg_f5()

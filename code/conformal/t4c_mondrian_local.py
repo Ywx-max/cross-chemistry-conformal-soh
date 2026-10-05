@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
-"""T4c-Mondrian：按 SOH 分箱的条件化保形（论文 4.5 的"扩展"对照之一）。
+"""T4c-Mondrian: conditional conformal by SOH binning (one of the Section 4.5 extension controls).
 
-按 SOH 高低段把校准窗口分成 3 箱、各箱单独计算保形分位数，使区间宽度随局部
-误差变化。结果：NASA 上宽度收窄约 21%，覆盖率同时降至 0.64±0.18；CALCE 上
-宽度与覆盖均无实质改善。单次运行中偶见的覆盖修正，在多种子平均后不成立。
+Calibration windows are split into 3 bins by SOH level with a per-bin conformal quantile, letting interval
+width track local error. Result: on NASA width narrows by about 21% while coverage drops to 0.64+/-0.18; on CALCE
+neither width nor coverage improves materially. Coverage fixes seen in single runs do not survive multi-seed averaging.
 
-实现要点：残差与 SOH 都先按每 W=20 个连续循环聚成一块再分箱，避免逐窗口的
-SOH 抖动把箱内样本搅乱。
+Implementation note: residuals and SOH are first averaged into blocks of W=20 consecutive cycles before binning,
+so per-window SOH jitter cannot scramble the bins.
 
-运行：python t4c_mondrian_local.py --seed 42
-输出：results/conformal/t4c_mondrian_s<seed>.json（single = 单一分位数基线对照）"""
+Run: python t4c_mondrian_local.py --seed 42
+Output: results/conformal/t4c_mondrian_s<seed>.json (single = single-quantile baseline control)"""
 import json, os, random, time, argparse
 import numpy as np, pandas as pd, torch, torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 OUT = "results/conformal"
-# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
-# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+# soh must be dropped: it is the label of the SOH task, and a label in the inputs hands the answer to the model
+# (before the 2026-10-03 fix an identity-copy baseline scored RMSE=0, the leak in plain sight).
 FEATS=['capacity_Ah','discharge_dur_s','v_mean_V','v_min_V','ica_peak','ica_peak_V']
-# NB=3：按 SOH 分 3 箱（分位点 1/3、2/3 处切）。校准电芯只有 1~2 颗时每箱样本极少，
-# 这是 Mondrian 在小校准集上失灵的直接原因
-# H=10：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前预测）
-W=20; DATA="data/建模表_v3.csv"; ALPHA=0.10; NB=3; H=10
+# NB=3: three SOH bins (cut at the 1/3 and 2/3 quantiles). With only 1-2 calibration cells each bin holds very few samples,
+# which is the direct reason Mondrian fails on small calibration sets
+# H=10: label = soh at H cycles after the last row of the window (H-step-ahead prediction)
+W=20; DATA="data/modeling_table_v3.csv"; ALPHA=0.10; NB=3; H=10
 def set_seed(s):
     random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
 def build_windows(df, W=20, H=10):
@@ -80,12 +80,12 @@ def cc(cells,bids):
     X=np.concatenate([cells[b][0] for b in bids]); y=np.concatenate([cells[b][1] for b in bids])
     return X,y
 def cq(res,a):
-    # 与 t4_conformal.conformal_q 同一个公式；min(n-1,...) 是 n 太小时的兜底
+    # same formula as t4_conformal.conformal_q; min(n-1, ...) is the fallback for tiny n
     n=len(res); idx=min(n-1,int(np.ceil((n+1)*(1-a)))-1)
     return float(np.sort(res)[idx])
 def chunk_res(res, W=20):
-    # 每 W 个连续循环取均值 = 一个"块"。尾部不足 W 的零头丢弃，
-    # 保证校准/测试两侧块数天然对齐。
+    # the mean of each W consecutive cycles is one block; the tail shorter than W is dropped,
+    # so calibration and test ends up with naturally aligned block counts.
     n=len(res)//W
     return np.array([np.mean(res[i*W:(i+1)*W]) for i in range(n)])
 def main():
@@ -95,7 +95,7 @@ def main():
     ap.add_argument('--out', default="results/conformal")
     ap.add_argument('--src-cache', default=None)
     ap.add_argument('--horizon', type=int, default=H,
-                    help='超前步长：标签 = 窗口末行后第 H 个循环的 soh')
+                    help='horizon: label = soh at H cycles after the last window row')
     args=ap.parse_args()
     SEED=args.seed
     OUT=args.out
@@ -105,7 +105,7 @@ def main():
     sb=sorted(src); random.Random(SEED).shuffle(sb)
     nv=max(1,int(len(sb)*0.1)); Xtr,ytr=cc(src,sb[:-nv]); Xva,yva=cc(src,sb[-nv:])
     sc=StandardScaler().fit(Xtr.reshape(-1,Xtr.shape[2]))
-    set_seed(SEED)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    set_seed(SEED)  # seed before instantiating: otherwise same-seed reruns initialise different weights
     model=TCN(Xtr.shape[2]).to(device)
     _cache_hit=None
     if args.src_cache:
@@ -123,14 +123,14 @@ def main():
         if args.src_cache:
             _save=os.path.join(args.src_cache,'src_tcn_s%d_ep120_h%d.pt' % (SEED, args.horizon))
             torch.save(model.state_dict(), _save)
-            print('[cache] 源模型已写入 %s' % _save, flush=True)
+            print('[cache] source model written to %s' % _save, flush=True)
     results={'horizon':args.horizon,'targets':{}}
     for tg in ['CALCE','NASA']:
         tgt=build_windows(df[df['dataset']==tg], H=args.horizon)
         tbg=sorted(tgt); random.Random(SEED).shuffle(tbg)
-        # 三分协议：微调/校准/测试按 1/3 切（与表 5 的硬编码划分不同，论文 4.5
-        # 扩展段声明的"不同电芯划分协议"就是这里）。实际切法：CALCE 16 颗 = 5/5/6，
-        # NASA 4 颗 = 1/1/2（len//3 动态三分）；两侧共用同一个随机洗牌序列，划分随种子可复现
+        # third-split protocol: fine-tune/calibration/test cut 1/3 each (different from the hard-coded Table 5 splits;
+        # this is the "different cell-split protocol" declared in the Section 4.5 extensions). Actual cuts: CALCE 16 cells = 5/5/6,
+        # NASA 4 cells = 1/1/2 (dynamic len//3 thirds); both ends share one random shuffle, so the split is reproducible per seed
         nf=max(1,len(tbg)//3)
         ft_b,cal_b,te_b=tbg[:nf],tbg[nf:nf*2],tbg[nf*2:]
         Xa,ya=cc(tgt,tbg); sct=StandardScaler().fit(Xa.reshape(-1,Xa.shape[2]))
@@ -147,10 +147,10 @@ def main():
         tres_c=chunk_res(tres,W); n_t=len(tres_c)
         te_soh_c=np.array([np.mean(yte[i*W:(i+1)*W]) for i in range(n_t)])
         picp_s=float(np.mean(tres_c<=q1)); mpiw_s=2*q1
-        # 分箱保形主体：按块均值 SOH 切 3 箱，每箱独立算分位数
+        # binning conformal proper: three bins by block-mean SOH, an independent quantile per bin
         be=np.quantile(cal_soh_c,[1/NB,2/NB])
         pl,wl=[],[]
-        # cm.sum()<2 的箱子直接放弃：两三个块算出来的分位数毫无统计意义
+        # bins with cm.sum()<2 are dropped outright: a quantile from two or three blocks is statistically meaningless
         for b in range(NB):
             if b==0: cm=cal_soh_c<=be[0]; tm=te_soh_c<=be[0]
             elif b==NB-1: cm=cal_soh_c>be[-1]; tm=te_soh_c>be[-1]
