@@ -17,8 +17,7 @@ abstract: >-
   recalibration in cross-chemistry state-of-health prediction of lithium-ion batteries"
   (submitted to the Journal of Energy Storage). Dual licensing: the code is licensed under MIT
   (LICENSE); the derived results, figures and modeling tables are licensed under CC-BY-4.0
-  (DATA_LICENSE.md). Third-party datasets are not redistributed. Zenodo DOI: [Zenodo DOI]
-  upon acceptance.
+  (DATA_LICENSE.md). Third-party datasets are not redistributed. Zenodo DOI: 10.5281/zenodo.23159359.
 keywords:
   - lithium-ion battery
   - state of health

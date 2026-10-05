@@ -60,7 +60,7 @@ Appendix E.3 for the cost on an NVIDIA RTX 4060 Laptop GPU, CUDA 12.8, PyTorch 2
 
 ## Citation
 
-See `CITATION.cff`. A Zenodo DOI will be added upon acceptance of the manuscript.
+See `CITATION.cff`. Archived on Zenodo: [10.5281/zenodo.23159359](https://doi.org/10.5281/zenodo.23159359).
 
 ## Contact
 
