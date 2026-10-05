@@ -1,0 +1,8 @@
+# P0-3 统计升级
+test: wilcoxon_signed_rank_exact_two_sided
+correction: holm_bonferroni
+families: {ft: 8, zero: 8}
+effect_size: cohens_dz_paired
+input: results_cx2/transfer/persistence_baseline.json::paired
+n_per_comparison: 5
+note: n=5 时双侧最小可能 p=0.0625，显著性以效应量+方向一致性表述

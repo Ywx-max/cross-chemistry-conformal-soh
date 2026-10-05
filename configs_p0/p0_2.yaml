@@ -1,0 +1,10 @@
+# P0-2 区间指标与 alpha 扫描（同协议重算批）
+protocol_source: code/conformal/t4_conformal_local.py @ v1.2.4 (b6c3e39)
+alphas: [0.05, 0.10, 0.20]
+routes: [target, source]
+metrics: [PICP, MPIW, NMPIW, Winkler, pinball]
+seeds: [42, 43, 44, 45, 46]
+window: 20
+horizon: 10
+data: data/建模表_v3_cx2.csv
+src_cache: results_cx2/src_cache

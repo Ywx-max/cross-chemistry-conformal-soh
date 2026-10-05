@@ -1,0 +1,5 @@
+# P0-5 成本表
+hardware: 'NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB, CUDA 12.8, PyTorch 2.11.0+cu128'
+backbones: [tcn, lstm, gru, transformer]
+measures: [params, source_fit_time, peak_mem, latency_b1, latency_b256]
+protocol: Section 3.2（MSE/Adam 1e-3/batch 256/裁剪 1.0/早停耐心 10/上限 120）

@@ -1,0 +1,26 @@
+P0-1 device=cuda z95=1.6449
+== MC dropout ==
+[MC s42] 13s
+[MC s43] 17s
+[MC s44] 18s
+[MC s45] 14s
+[MC s46] 11s
+== Deep ensemble (seed 42 split, 5 members) ==
+[ensemble] 93s
+== Quantile regression (tau=0.1/0.9) ==
+[QR s42] 123s
+[QR s43] 67s
+[QR s44] 122s
+[QR s45] 137s
+[QR s46] 53s
+P0-1 完成 667s，共 42 行 -> p0_1_uncertainty.csv
+
+=== 5 种子汇总（mean±std PICP / MPIW / Winkler） ===
+  Deep ensemble (5, seed42 split)    CALCE  PICP 0.402±nan  MPIW 0.067±nan  Winkler 0.5769
+  Deep ensemble (5, seed42 split)    NASA   PICP 0.007±nan  MPIW 0.011±nan  Winkler 0.4253
+  MC dropout                         CALCE  PICP 0.397±0.076  MPIW 0.059±0.002  Winkler 0.7594
+  MC dropout                         NASA   PICP 0.522±0.163  MPIW 0.042±0.004  Winkler 0.2103
+  Quantile regression                CALCE  PICP 0.461±0.184  MPIW 0.091±0.031  Winkler 0.7828
+  Quantile regression                NASA   PICP 0.801±0.149  MPIW 0.046±0.018  Winkler 0.0847
+  Split conformal (recomputed)       CALCE  PICP 0.811±0.146  MPIW 0.239±0.111  Winkler 0.5595
+  Split conformal (recomputed)       NASA   PICP 0.920±0.120  MPIW 0.080±0.024  Winkler 0.0998

@@ -1,0 +1,4 @@
+# P0-4 persistence 进主表（替换式）
+table3_change: 新增 Persistence (H = 10) 列（CALCE 0.0832 / NASA 0.0269，全电芯池化）
+data: results_cx2/transfer/persistence_baseline.json::all_cell
+wordcount_constraint: 保守口径 <= 5750

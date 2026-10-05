@@ -1,0 +1,5 @@
+model,params,params_M,train_time_s,peak_mem_MiB,latency_b1_ms,latency_b256_ms,weight_file_KB,hardware
+tcn,38785,0.039,103.8,357.8,0.83,0.886,155.9,"NVIDIA GeForce RTX 4060 Laptop GPU, 8.0 GB, CUDA 12.8, PyTorch 2.11.0+cu128"
+lstm,201857,0.202,21.0,3257.9,0.319,1.55,791.1,"NVIDIA GeForce RTX 4060 Laptop GPU, 8.0 GB, CUDA 12.8, PyTorch 2.11.0+cu128"
+gru,151425,0.151,16.6,2480.3,0.214,0.851,594.1,"NVIDIA GeForce RTX 4060 Laptop GPU, 8.0 GB, CUDA 12.8, PyTorch 2.11.0+cu128"
+transformer,464001,0.464,47.8,1005.6,1.811,1.962,1826.5,"NVIDIA GeForce RTX 4060 Laptop GPU, 8.0 GB, CUDA 12.8, PyTorch 2.11.0+cu128"

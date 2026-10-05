@@ -1,0 +1,7 @@
+# P0-6 W/H 敏感性
+part_a: {model: tcn, W: [10, 30, 40], H: 10, note: 'W=20 基线在主表/P0-2'}
+part_b: {model: lstm, W: 20, H: [5, 20], note: 'TCN H5/H20 已有 transfer_sens_h5/h20'}
+seeds: [42, 43, 44, 45, 46]
+split: {calce: [8,8], nasa: [2,2]}
+src_training: {epochs: 120, patience: 10}
+finetune: {epochs: 60, lr: 3.0e-4}

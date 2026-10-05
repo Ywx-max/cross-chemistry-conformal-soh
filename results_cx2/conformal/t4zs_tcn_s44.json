@@ -1,0 +1,85 @@
+{
+ "model": "tcn",
+ "alpha": 0.1,
+ "q_src": 0.0033928751945495605,
+ "horizon": 10,
+ "targets": {
+  "CALCE": {
+   "split": {
+    "cal": [
+     "CS2_36",
+     "CS2_35"
+    ],
+    "te": [
+     "CS2_38",
+     "CS2_34",
+     "CS2_33",
+     "CX2_34",
+     "CX2_37",
+     "CX2_16",
+     "CX2_36"
+    ]
+   },
+   "q_src": 0.0033928751945495605,
+   "MPIW_src": 0.006785750389099121,
+   "zero_shot": {
+    "RMSE": 0.1591065227985382,
+    "med_abs_r": 0.09448960423469543,
+    "PICP_src_zeroshot": 0.024048972452995192
+   },
+   "per_cell": {
+    "CS2_38": {
+     "n_windows": 1018,
+     "cov_src_zeroshot": 0.021611001964636542
+    },
+    "CS2_34": {
+     "n_windows": 717,
+     "cov_src_zeroshot": 0.008368200836820083
+    },
+    "CS2_33": {
+     "n_windows": 688,
+     "cov_src_zeroshot": 0.027616279069767442
+    },
+    "CX2_34": {
+     "n_windows": 1697,
+     "cov_src_zeroshot": 0.016499705362404242
+    },
+    "CX2_37": {
+     "n_windows": 1216,
+     "cov_src_zeroshot": 0.046875
+    },
+    "CX2_16": {
+     "n_windows": 1910,
+     "cov_src_zeroshot": 0.025130890052356022
+    },
+    "CX2_36": {
+     "n_windows": 1902,
+     "cov_src_zeroshot": 0.02103049421661409
+    }
+   }
+  },
+  "NASA": {
+   "split": {
+    "cal": [
+     "B0007"
+    ],
+    "te": [
+     "B0018"
+    ]
+   },
+   "q_src": 0.0033928751945495605,
+   "MPIW_src": 0.006785750389099121,
+   "zero_shot": {
+    "RMSE": 0.10788413137197495,
+    "med_abs_r": 0.11532437801361084,
+    "PICP_src_zeroshot": 0.0
+   },
+   "per_cell": {
+    "B0018": {
+     "n_windows": 103,
+     "cov_src_zeroshot": 0.0
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,386 @@
+{
+ "E1": {
+  "cap": "Table E.1. Alpha sweep of the target-calibrated split-conformal intervals (same-protocol recomputation batch).",
+  "header": [
+   "Backbone",
+   "Target domain",
+   "alpha",
+   "PICP",
+   "NMPIW",
+   "Winkler",
+   "Pinball"
+  ],
+  "rows": [
+   [
+    "TCN",
+    "CALCE",
+    "0.05",
+    "0.905 ± 0.079",
+    "0.452 ± 0.191",
+    "0.7377",
+    "0.00922"
+   ],
+   [
+    "TCN",
+    "CALCE",
+    "0.10",
+    "0.836 ± 0.136",
+    "0.333 ± 0.160",
+    "0.5698",
+    "0.01425"
+   ],
+   [
+    "TCN",
+    "CALCE",
+    "0.20",
+    "0.723 ± 0.183",
+    "0.237 ± 0.156",
+    "0.4224",
+    "0.02112"
+   ],
+   [
+    "TCN",
+    "NASA",
+    "0.05",
+    "0.970 ± 0.054",
+    "0.134 ± 0.037",
+    "0.1142",
+    "0.00143"
+   ],
+   [
+    "TCN",
+    "NASA",
+    "0.10",
+    "0.943 ± 0.070",
+    "0.105 ± 0.015",
+    "0.0930",
+    "0.00233"
+   ],
+   [
+    "TCN",
+    "NASA",
+    "0.20",
+    "0.916 ± 0.103",
+    "0.090 ± 0.013",
+    "0.0791",
+    "0.00395"
+   ],
+   [
+    "LSTM",
+    "CALCE",
+    "0.05",
+    "0.872 ± 0.101",
+    "0.384 ± 0.205",
+    "0.7423",
+    "0.00928"
+   ],
+   [
+    "LSTM",
+    "CALCE",
+    "0.10",
+    "0.787 ± 0.168",
+    "0.244 ± 0.127",
+    "0.5492",
+    "0.01373"
+   ],
+   [
+    "LSTM",
+    "CALCE",
+    "0.20",
+    "0.695 ± 0.192",
+    "0.192 ± 0.128",
+    "0.3823",
+    "0.01912"
+   ],
+   [
+    "LSTM",
+    "NASA",
+    "0.05",
+    "0.915 ± 0.159",
+    "0.122 ± 0.060",
+    "0.1386",
+    "0.00173"
+   ],
+   [
+    "LSTM",
+    "NASA",
+    "0.10",
+    "0.898 ± 0.162",
+    "0.103 ± 0.046",
+    "0.1066",
+    "0.00266"
+   ],
+   [
+    "LSTM",
+    "NASA",
+    "0.20",
+    "0.854 ± 0.198",
+    "0.084 ± 0.036",
+    "0.0839",
+    "0.00420"
+   ]
+  ],
+  "note": "Note: mean ± std over 5 seeds; PICP = empirical coverage; NMPIW = MPIW divided by the mean true SOH of the test windows; Winkler score at the nominal level (lower is better); Pinball = mean of the alpha/2 and 1-alpha/2 quantile losses (lower is better); NMPIW and Winkler shrink as alpha grows because the intervals narrow. Protocol and drift analysis in Appendix E.1; CSV: results_p0/p0_2_metrics.csv."
+ },
+ "E2": {
+  "cap": "Table E.2. Paired statistics of fine-tuned model versus persistence baseline (five per-seed pooled RMSEs).",
+  "header": [
+   "Comparison",
+   "dz",
+   "Wilcoxon p (exact)",
+   "Holm p",
+   "Wins (model better)",
+   "t-test p (original)"
+  ],
+  "rows": [
+   [
+    "CALCE/TCN, H = 5",
+    "+1.25",
+    "0.0625",
+    "0.500",
+    "0/5",
+    "0.049"
+   ],
+   [
+    "CALCE/TCN, H = 10",
+    "+1.22",
+    "0.0625",
+    "0.500",
+    "0/5",
+    "0.052"
+   ],
+   [
+    "CALCE/TCN, H = 20",
+    "+0.80",
+    "0.125",
+    "0.625",
+    "1/5",
+    "0.148"
+   ],
+   [
+    "NASA/TCN, H = 5",
+    "+0.96",
+    "0.125",
+    "0.625",
+    "1/5",
+    "0.099"
+   ],
+   [
+    "NASA/TCN, H = 10",
+    "-0.64",
+    "0.3125",
+    "0.938",
+    "3/5",
+    "0.225"
+   ],
+   [
+    "NASA/TCN, H = 20",
+    "-3.42",
+    "0.0625",
+    "0.500",
+    "5/5",
+    "0.002"
+   ],
+   [
+    "CALCE/LSTM, H = 10",
+    "+0.26",
+    "0.625",
+    "0.938",
+    "2/5",
+    "0.590"
+   ],
+   [
+    "NASA/LSTM, H = 10",
+    "-0.57",
+    "0.3125",
+    "0.938",
+    "3/5",
+    "0.272"
+   ]
+  ],
+  "note": "Note: dz = paired Cohen's d on the per-seed RMSE differences (positive = model worse than persistence); exact two-sided Wilcoxon signed-rank; Holm-Bonferroni within the eight-comparison family; the zero-shot family (all dz between +2.55 and +11.70, all p = 0.0625, 0 wins in all 40 seed-domain-backbone runs) is tabulated in the supplementary CSV. With n = 5 paired samples the smallest attainable two-sided p is 0.0625. Pooling caveat: the per-seed persistence RMSEs here are pooled over test windows within each run (same pooling as the model column; CALCE/TCN H = 10 gives 0.0715-0.0966 per seed), whereas the single-value persistence of Table 3 pools all cells (0.0832); the two differ at the second decimal."
+ },
+ "E3": {
+  "cap": "Table E.3. Computational cost of the four backbones (RTX 4060 Laptop GPU, 8 GB, CUDA 12.8, PyTorch 2.11).",
+  "header": [
+   "Backbone",
+   "Parameters",
+   "Source fit time (s)",
+   "Peak memory (MiB)",
+   "Latency, batch 1 (ms)",
+   "Latency, batch 256 (ms)"
+  ],
+  "rows": [
+   [
+    "TCN",
+    "0.039M",
+    "103.8",
+    "358",
+    "0.83",
+    "0.89"
+   ],
+   [
+    "LSTM",
+    "0.202M",
+    "21.0",
+    "3258",
+    "0.32",
+    "1.55"
+   ],
+   [
+    "GRU",
+    "0.151M",
+    "16.6",
+    "2480",
+    "0.21",
+    "0.85"
+   ],
+   [
+    "Transformer",
+    "0.464M",
+    "47.8",
+    "1006",
+    "1.81",
+    "1.96"
+   ]
+  ],
+  "note": "Note: one source-domain fit per backbone under the protocol of Section 3.2 (early stopping patience 10, cap 120 epochs); the wall-clock reflects each architecture's own early-stopping draw, consistent with the budget caveat of Table 2; inference latency averaged over 100 forward passes after warm-up on GPU."
+ },
+ "E4": {
+  "cap": "Table E.4. Uncertainty baselines versus target-calibrated conformal intervals (alpha = 0.10, identical splits and seeds).",
+  "header": [
+   "Method",
+   "CALCE PICP",
+   "CALCE MPIW",
+   "CALCE Winkler",
+   "NASA PICP",
+   "NASA MPIW",
+   "NASA Winkler"
+  ],
+  "rows": [
+   [
+    "MC dropout (p = 0.1, 30 samples)",
+    "0.397 ± 0.076",
+    "0.059",
+    "0.759",
+    "0.522 ± 0.163",
+    "0.042",
+    "0.210"
+   ],
+   [
+    "Deep ensemble (5 members, seed-42 split)",
+    "0.402",
+    "0.067",
+    "0.577",
+    "0.007",
+    "0.011",
+    "0.425"
+   ],
+   [
+    "Quantile regression (tau = 0.1/0.9)",
+    "0.461 ± 0.184",
+    "0.091",
+    "0.783",
+    "0.801 ± 0.149",
+    "0.046",
+    "0.085"
+   ],
+   [
+    "Split conformal (target-calibrated)",
+    "0.836 ± 0.136",
+    "0.277",
+    "0.570",
+    "0.943 ± 0.070",
+    "0.081",
+    "0.093"
+   ]
+  ],
+  "note": "Note: mean ± std over 5 seeds (42-46; the ensemble uses the seed-42 split with five initialisations, a single split by cost); nominal coverage 0.90; the conformal row is the TCN subset of the recomputation batch of Table E.1 at alpha = 0.10 (five seeds), matching the TCN backbone of the baseline rows; ensemble intervals are mean ± z_{0.95} times the member standard deviation, MC dropout uses 30 train-mode sampling passes, quantile regression outputs the tau = 0.1/0.9 heads directly. CSV: results_p0/p0_1_uncertainty.csv."
+ },
+ "E5": {
+  "cap": "Table E.5. Window (W) and horizon (H) sensitivity of the fine-tuned transfer (five-seed mean ± std RMSE).",
+  "header": [
+   "Model",
+   "W",
+   "H",
+   "CALCE fine-tuned RMSE",
+   "NASA fine-tuned RMSE",
+   "persistence (H-matched)"
+  ],
+  "rows": [
+   [
+    "TCN",
+    "10",
+    "10",
+    "0.1024 ± 0.0209",
+    "0.0298 ± 0.0080",
+    "0.0832 / 0.0269"
+   ],
+   [
+    "TCN (main)",
+    "20",
+    "10",
+    "0.0913 ± 0.0161",
+    "0.0230 ± 0.0049",
+    "0.0832 / 0.0269"
+   ],
+   [
+    "TCN",
+    "30",
+    "10",
+    "0.1056 ± 0.0174",
+    "0.0247 ± 0.0066",
+    "0.0832 / 0.0269"
+   ],
+   [
+    "TCN",
+    "40",
+    "10",
+    "0.1042 ± 0.0179",
+    "0.0243 ± 0.0062",
+    "0.0832 / 0.0269"
+   ],
+   [
+    "TCN",
+    "20",
+    "5",
+    "0.0795 ± 0.0150",
+    "0.0231 ± 0.0051",
+    "0.0665 / 0.0181"
+   ],
+   [
+    "TCN",
+    "20",
+    "20",
+    "0.1091 ± 0.0145",
+    "0.0321 ± 0.0032",
+    "0.1066 / 0.0461"
+   ],
+   [
+    "LSTM (main)",
+    "20",
+    "10",
+    "0.0819 ± 0.0126",
+    "0.0227 ± 0.0077",
+    "0.0832 / 0.0269"
+   ],
+   [
+    "LSTM",
+    "20",
+    "5",
+    "0.0840 ± 0.0128",
+    "0.0183 ± 0.0043",
+    "0.0665 / 0.0181"
+   ],
+   [
+    "LSTM",
+    "20",
+    "20",
+    "0.1186 ± 0.0153",
+    "0.0239 ± 0.0036",
+    "0.1066 / 0.0461"
+   ]
+  ],
+  "note": "Note: W sensitivity (W = 10/30/40 versus the main W = 20) retrains the source model per window length under the protocol of Section 3.2; the LSTM horizon rows extend the horizon sensitivity of Section 4.3 (the TCN H = 5/20 rows come from the archived transfer_sens runs of the same anchor). The persistence column repeats the H-matched pooled baseline of Table 3 for reading off whether the fine-tuned model beats it at each setting."
+ }
+}

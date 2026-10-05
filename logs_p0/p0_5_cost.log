@@ -1,0 +1,7 @@
+硬件: NVIDIA GeForce RTX 4060 Laptop GPU, 8.0 GB, CUDA 12.8, PyTorch 2.11.0+cu128
+源域窗口: train 79248, val 14193, dim 6
+[tcn] params=38785 (0.039M) train=103.8s peak=358MiB b1=0.83ms b256=0.886ms
+[lstm] params=201857 (0.202M) train=21.0s peak=3258MiB b1=0.319ms b256=1.55ms
+[gru] params=151425 (0.151M) train=16.6s peak=2480MiB b1=0.214ms b256=0.851ms
+[transformer] params=464001 (0.464M) train=47.8s peak=1006MiB b1=1.811ms b256=1.962ms
+P0-5 完成 -> p0_5_cost.csv

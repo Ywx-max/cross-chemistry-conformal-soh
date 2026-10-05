@@ -1,0 +1,333 @@
+# -*- coding: utf-8 -*-
+"""T4d 保形覆盖的两项补充诊断（论文 4.6 节的数据出处）。
+
+表 5 报的是"汇集所有测试窗口"的边际覆盖率。该口径下有两个问题，本脚本依次诊断：
+
+第一，边际覆盖不等于条件覆盖。把覆盖率拆到每颗测试电芯（cov_tgt / cov_src），
+   检查是否存在个别电芯被平均所掩盖。
+
+第二，循环级残差自相关，可交换性不成立。把校准得分聚合到电芯级（中位数/p90/
+   均值三种口径）后再走保形：1~2 颗校准电芯只给出 1~2 个电芯级得分，分位数
+   退化为最大值，有限样本保证不再成立，结果仅有经验意义。
+
+口径（与 t4 一致）：校准残差由微调后的部署模型在校准电芯上计算，保证校准与
+评估同源。本脚本输出逐电芯残差向量（t4 亦输出），给出按电芯聚合的保形变体，
+并与 t4_*.json 做逐组划分 assert 校验。
+
+复用 t4_conformal_local 的协议与随机次序：电芯划分由种子唯一决定。
+源模型按 (model, seed) 缓存到 src_cache/，重跑免预训练。
+
+用法：python t4d_per_cell_diag.py --model tcn --seed 42
+输出：results/conformal/t4d_per_cell_{model}_s{seed}.json"""
+import argparse, json, os, random, time
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import StandardScaler
+
+# soh 必须剔除：SOH 任务的标签就是 soh，标签列进输入等于把答案喂给模型
+# （2026-10-03 修复前恒等复制基线 RMSE=0，即泄漏实锤）。
+FEATS = ["capacity_Ah", "discharge_dur_s", "v_mean_V", "v_min_V",
+         "ica_peak", "ica_peak_V"]
+WINDOW = 20
+# 超前步长：标签 = 窗口末行之后第 H 个循环的 soh（H 步超前 SOH 预测）。
+H = 10
+DATA = "data/建模表_v3.csv"
+ALPHA = 0.10
+OUT = "results/conformal"
+CACHE = os.path.join(OUT, "src_cache")
+REF = "results/conformal"
+
+
+def set_seed(seed):
+    random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def build_windows_ds(df, dataset, window=WINDOW, horizon=H):
+    cells = {}
+    sub = df[df["dataset"] == dataset]
+    for bid, g in sub.sort_values("cycle").groupby("battery_id"):
+        f = g[FEATS].astype(float).copy()
+        f = f.interpolate(limit_direction="both").fillna(0.0).values
+        cyc = g["cycle"].values
+        y = g["soh"].astype(float).values
+        ok = ~np.isnan(y)
+        f, cyc, y = f[ok], cyc[ok], y[ok]
+        X, yy = [], []
+        for i in range(window - 1, len(f) - horizon):
+            if cyc[i] - cyc[i - window + 1] == window - 1 \
+                    and cyc[i + horizon] == cyc[i] + horizon:
+                X.append(f[i - window + 1:i + 1]); yy.append(y[i + horizon])
+        if X:
+            cells[bid] = (np.asarray(X, np.float32), np.asarray(yy, np.float32))
+    return cells
+
+
+class CausalBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, k, dil):
+        super().__init__()
+        self.pad = (k - 1) * dil
+        self.conv = nn.Conv1d(in_ch, out_ch, k, dilation=dil, padding=self.pad)
+        self.res = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+
+    def forward(self, x):
+        y = self.conv(x)
+        if self.pad:
+            y = y[:, :, :-self.pad]
+        return torch.relu(y + self.res(x))
+
+
+class TCN(nn.Module):
+    def __init__(self, input_dim, d=64, layers=4):
+        super().__init__()
+        ch = [input_dim] + [d] * layers
+        self.blocks = nn.ModuleList([CausalBlock(ch[i], ch[i+1], 3, 2**i) for i in range(layers)])
+        self.fc = nn.Linear(d, 1)
+
+    def forward(self, x):
+        h = x.transpose(1, 2)
+        for blk in self.blocks:
+            h = blk(h)
+        return self.fc(h[:, :, -1]).squeeze(-1)
+
+
+class RNNWrap(nn.Module):
+    def __init__(self, input_dim, kind):
+        super().__init__()
+        self.r = (nn.LSTM if kind == "lstm" else nn.GRU)(input_dim, 128, 2, batch_first=True, dropout=0.1)
+        self.fc = nn.Linear(128, 1)
+
+    def forward(self, x):
+        o, _ = self.r(x)
+        return self.fc(o[:, -1]).squeeze(-1)
+
+
+def new_model(name, input_dim):
+    if name in ("lstm", "gru"):
+        return RNNWrap(input_dim, name)
+    if name == "tcn":
+        return TCN(input_dim)
+    raise ValueError(name)
+
+
+def fit_model(model, Xtr, ytr, epochs, seed, device, Xva=None, yva=None, lr=1e-3):
+    set_seed(seed)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    lossf = nn.MSELoss()
+    ds = torch.utils.data.TensorDataset(torch.tensor(Xtr, dtype=torch.float32),
+                                        torch.tensor(ytr, dtype=torch.float32))
+    dl = torch.utils.data.DataLoader(ds, batch_size=256, shuffle=True)
+    Xva = Xtr if Xva is None else Xva
+    yva = ytr if yva is None else yva
+    best, best_state, patience = float("inf"), None, 0
+    for ep in range(epochs):
+        model.train()
+        for xb, yb in dl:
+            xb, yb = xb.to(device), yb.to(device)
+            opt.zero_grad(); lossf(model(xb), yb).backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        model.eval()
+        with torch.no_grad():
+            va = lossf(model(torch.tensor(Xva, dtype=torch.float32).to(device)),
+                       torch.tensor(yva, dtype=torch.float32).to(device)).item()
+        if np.isfinite(va) and va < best - 1e-6:
+            best, patience = va, 0
+            best_state = {k: v.clone() for k, v in model.state_dict().items()}
+        else:
+            patience += 1
+            if patience >= 10:
+                break
+    if best_state:
+        model.load_state_dict(best_state)
+    return model
+
+
+def predict(model, X, device):
+    model.eval()
+    with torch.no_grad():
+        return model(torch.tensor(X, dtype=torch.float32).to(device)).cpu().numpy()
+
+
+def std_with(sc, X):
+    return ((X - sc.mean_) / (sc.scale_ + 1e-8)).astype(np.float32)
+
+
+def concat_cells(cells, bids):
+    X = np.concatenate([cells[b][0] for b in bids])
+    y = np.concatenate([cells[b][1] for b in bids])
+    return X, y, [b for b in bids for _ in range(len(cells[b][0]))]
+
+
+def conformal_q(residuals, alpha=ALPHA):
+    # 同 t4_conformal.conformal_q：ceil((n+1)(1-alpha)) 次序统计量，n 太小时兜底取最大
+    n = len(residuals)
+    idx = min(n - 1, int(np.ceil((n + 1) * (1 - alpha))) - 1)
+    return float(np.sort(residuals)[idx])
+
+
+def get_source_model(model_name, seed, Xtr, ytr, Xva, yva, input_dim, device, epochs,
+                     horizon=H, cache_dir=None):
+    """源模型按 (model, seed) 落盘缓存。诊断要跑 2 骨干 × 5 种子共 10 次预训练，
+    不缓存的话每次调整诊断口径都要重练源域；缓存后增量分析只是秒级推理。
+    cache_dir 必须显式传入：main 里的 CACHE 是局部变量，模块级 CACHE 只是缺省值，
+    此前 --src-cache 因闭包不可见而静默失效（2026-10-03 修复）。"""
+    cache_dir = cache_dir or CACHE
+    os.makedirs(cache_dir, exist_ok=True)
+    # 缓存键含 epochs/horizon（改任一口径不会静默复用旧模型）；旧命名作回退以兼容既有缓存
+    p_new = os.path.join(cache_dir, "src_%s_s%d_ep%d_h%d.pt" % (model_name, seed, epochs, horizon))
+    p_old = os.path.join(cache_dir, "t4d_src_%s_s%d.pt" % (model_name, seed))
+    p = p_new if os.path.exists(p_new) else (p_old if os.path.exists(p_old) else p_new)
+    set_seed(seed)  # 先定随机源再实例化：否则同种子重跑权重初始化不同
+    model = new_model(model_name, input_dim).to(device)
+    if os.path.exists(p):
+        model.load_state_dict(torch.load(p, map_location=device, weights_only=True))
+        print("[cache] load source model %s" % p, flush=True)
+        return model
+    t0 = time.time()
+    model = fit_model(model, Xtr, ytr, epochs, seed, device, Xva, yva)
+    torch.save(model.state_dict(), p)
+    print("source pretrain done %ds -> %s" % (time.time()-t0, p), flush=True)
+    return model
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default="tcn")
+    ap.add_argument("--epochs", type=int, default=120)
+    ap.add_argument("--ft-epochs", type=int, default=60)
+    ap.add_argument("--horizon", type=int, default=H,
+                    help="超前步长：标签 = 窗口末行后第 H 个循环的 soh")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--data", default=DATA, help="建模表 csv 路径")
+    ap.add_argument("--out", default="results/conformal", help="结果输出目录")
+    ap.add_argument("--src-cache", default=None, help="统一源模型缓存目录（缺省 <out>/src_cache）")
+    ap.add_argument("--ref-dir", default="results/conformal", help="t4_*.json 参照目录（划分 assert 用）")
+    args = ap.parse_args()
+    CACHE = os.path.join(args.out, "src_cache") if args.src_cache is None else args.src_cache
+    OUT = args.out
+    REF = args.ref_dir
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("T4d per-cell diag device=%s model=%s seed=%d" % (device, args.model, args.seed), flush=True)
+    df = pd.read_csv(args.data)
+
+    src = build_windows_ds(df, "MIT", horizon=args.horizon)
+    src_bids = sorted(src)
+    random.Random(args.seed).shuffle(src_bids)
+    n_va = max(1, int(len(src_bids) * 0.1))
+    Xtr, ytr, _ = concat_cells(src, src_bids[:-n_va])
+    Xva, yva, _ = concat_cells(src, src_bids[-n_va:])
+    sc_src = StandardScaler().fit(Xtr.reshape(-1, Xtr.shape[2]))
+    Xtr, Xva = std_with(sc_src, Xtr), std_with(sc_src, Xva)
+    model = get_source_model(args.model, args.seed, Xtr, ytr, Xva, yva,
+                             Xtr.shape[2], device, args.epochs, args.horizon, CACHE)
+    src_cal_res = np.abs(predict(model, Xva, device) - yva)
+    q_src = conformal_q(src_cal_res)
+    print("q_src=%.4f" % q_src, flush=True)
+
+    # 一致性校验：诊断运行的电芯划分必须与论文表 5 用的 t4_*.json 完全一致，
+    # 否则逐电芯结果没法和主表对上。划分由种子唯一决定，理论上必然一致，assert 兜底
+    ref_p = os.path.join(REF, "t4_%s_s%d.json" % (args.model, args.seed))
+    ref = json.load(open(ref_p, encoding="utf-8")) if os.path.exists(ref_p) else None
+    if ref is not None and abs(ref["q_src"] - q_src) > 1e-3:
+        print("[warn] q_src differs from saved t4: new %.4f vs old %.4f (GPU nondeterminism, expected)"
+              % (q_src, ref["q_src"]), flush=True)
+
+    results = {"model": args.model, "alpha": ALPHA, "seed": args.seed, "q_src": q_src,
+               "horizon": args.horizon, "targets": {}}
+    # 划分与 t4 严格一致：直接从参照 t4_*.json 读取各目标域的 ft/cal/te 数
+    _ref_splits = {}
+    for tgt_name in ("CALCE", "NASA"):
+        _rp = os.path.join(REF, "t4_%s_s%d.json" % (args.model, args.seed))
+        if os.path.exists(_rp):
+            _sp = json.load(open(_rp, encoding="utf-8"))["targets"][tgt_name]["split"]
+            _ref_splits[tgt_name] = (len(_sp["ft"]), len(_sp["cal"]), len(_sp["te"]))
+    for tgt_name, split in [("CALCE", _ref_splits.get("CALCE", (3, 2, 3))),
+                            ("NASA", _ref_splits.get("NASA", (2, 1, 1)))]:
+        tgt = build_windows_ds(df, tgt_name, horizon=args.horizon)
+        tb = sorted(tgt)
+        n_ft, n_cal, n_te = split
+        random.Random(args.seed).shuffle(tb)
+        ft_b, cal_b, te_b = tb[:n_ft], tb[n_ft:n_ft+n_cal], tb[n_ft+n_cal:]
+        if ref is not None:
+            ref_split = ref["targets"][tgt_name]["split"]
+            assert ft_b == ref_split["ft"] and cal_b == ref_split["cal"] and te_b == ref_split["te"], \
+                "cell split mismatch vs saved t4!"
+        Xall_t, _, _ = concat_cells(tgt, tb)
+        sc_tgt = StandardScaler().fit(Xall_t.reshape(-1, Xall_t.shape[2]))
+        Xft, yft, _ = concat_cells(tgt, ft_b)
+        ft_model = new_model(args.model, Xtr.shape[2]).to(device)
+        ft_model.load_state_dict(model.state_dict())
+        ft_model = fit_model(ft_model, std_with(sc_tgt, Xft), yft,
+                             args.ft_epochs, args.seed, device, lr=3e-4)
+
+        # 校准电芯的部署模型残差（用微调后模型 ft_model，与 t4 校准/评估同源口径一致）
+        cal_cells = {}
+        for b in cal_b:
+            Xc, yc, _ = concat_cells(tgt, [b])
+            pred_c = predict(ft_model, std_with(sc_tgt, Xc), device)
+            cal_cells[b] = (np.abs(pred_c - yc)).tolist()
+        cal_res = np.concatenate([np.asarray(v) for v in cal_cells.values()])
+        q_tgt = conformal_q(cal_res)
+
+        te_cells = {}
+        for b in te_b:
+            Xb, yb, _ = concat_cells(tgt, [b])
+            pred_b = predict(ft_model, std_with(sc_tgt, Xb), device)
+            te_cells[b] = {"pred": pred_b.tolist(), "y": yb.tolist(),
+                           "res": np.abs(pred_b - yb).tolist()}
+
+        # 逐电芯覆盖率：两条校准路由各算一遍；residuals 存了逐循环残差，
+        # 之后想换诊断指标不用重训
+        per_cell = {}
+        for b, d in te_cells.items():
+            res = np.asarray(d["res"])
+            per_cell[b] = {"n_windows": int(len(res)),
+                           "residuals": [float(v) for v in res],
+                           "cov_tgt": float(np.mean(res <= q_tgt)),
+                           "cov_src": float(np.mean(res <= q_src)),
+                           "rmse": float(np.sqrt(np.mean(res ** 2)))}
+        # 按电芯聚合的保形变体：三种聚合粒度各试一遍。median 最稳
+        # （对电芯内误差尾部的离群循环不敏感），p90 相当于块内 90 分位，mean 居中。
+        # 注意 q_cell 的 n 只有电芯数（1~2），模块 docstring 里说的"退化"就指这里
+        agg_variants = {}
+        for agg_name, agg_fn in [("median", lambda r: float(np.median(r))),
+                                 ("p90", lambda r: float(np.quantile(r, 0.90))),
+                                 ("mean", lambda r: float(np.mean(r)))]:
+            cell_scores = [agg_fn(np.asarray(v)) for v in cal_cells.values()]
+            q_cell = conformal_q(np.asarray(cell_scores))
+            cov_cell = float(np.mean(np.concatenate(
+                [np.asarray(d["res"]) for d in te_cells.values()]) <= q_cell))
+            agg_variants[agg_name] = {"q_cell": q_cell, "PICP": cov_cell,
+                                      "MPIW": 2 * q_cell,
+                                      "n_cal_cells": len(cell_scores)}
+        te_res_all = np.concatenate([np.asarray(d["res"]) for d in te_cells.values()])
+        tgt_res = {
+            "split": {"ft": ft_b, "cal": cal_b, "te": te_b},
+            "q_target": q_tgt, "q_src": q_src,
+            "pooled_cov_tgt": float(np.mean(te_res_all <= q_tgt)),
+            "pooled_cov_src": float(np.mean(te_res_all <= q_src)),
+            "per_cell": per_cell,
+            "cal_cells_residuals": {b: [float(v) for v in vals]
+                                    for b, vals in cal_cells.items()},
+            "cal_cells_residual_summary": {b: {"n": len(v), "median": float(np.median(v)),
+                                               "p90": float(np.quantile(v, 0.9)),
+                                               "max": float(np.max(v))}
+                                           for b, v in cal_cells.items()},
+            "cell_aggregated_conformal": agg_variants}
+        results["targets"][tgt_name] = tgt_res
+        print("[%s] pooled_tgt=%.3f pooled_src=%.3f | per-cell cov_tgt=%s | cell-agg PICP median=%.3f"
+              % (tgt_name, tgt_res["pooled_cov_tgt"], tgt_res["pooled_cov_src"],
+                 {b: round(v["cov_tgt"], 3) for b, v in per_cell.items()},
+                 agg_variants["median"]["PICP"]), flush=True)
+
+    os.makedirs(OUT, exist_ok=True)
+    out_p = os.path.join(OUT, "t4d_per_cell_%s_s%d.json" % (args.model, args.seed))
+    with open(out_p, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=1, ensure_ascii=False)
+    print("T4d DONE -> %s" % out_p, flush=True)
+
+
+if __name__ == "__main__":
+    main()
